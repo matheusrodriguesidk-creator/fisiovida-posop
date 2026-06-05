@@ -534,8 +534,10 @@ async function saveSessao(dados) {
 async function avaliarIA(notas) {
   const anam = S.pac?.anamnese?.[0];
   const fase = calcFase(anam?.data_cirurgia);
-  const apiKey = S.config.claude_api_key;
-  if (!apiKey) throw new Error('Chave API não configurada em Configurações');
+
+  // Pegar JWT da sessão atual
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) throw new Error('Sessão expirada, faça login novamente.');
 
   const content = [];
   for (const f of S.fotos.slice(0, 3)) {
@@ -565,13 +567,18 @@ Analise as imagens fornecidas e gere uma avaliação clínica objetiva com:
 
 Seja objetivo e clínico. Máximo 250 palavras.` });
 
-  const r = await fetch('https://api.anthropic.com/v1/messages', {
+  // Chamar Edge Function proxy (evita bloqueio CORS da Anthropic)
+  const r = await fetch(`${SUPA_URL}/functions/v1/ia-proxy`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${session.access_token}`,
+    },
     body: JSON.stringify({ model: AI_MODEL, max_tokens: 1024, messages: [{ role: 'user', content }] })
   });
-  if (!r.ok) throw new Error(`API ${r.status}`);
+
   const d = await r.json();
+  if (!r.ok) throw new Error(d.error || `Erro ${r.status}`);
   return d.content?.[0]?.text || 'Sem resultado.';
 }
 
