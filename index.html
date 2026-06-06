@@ -570,18 +570,8 @@ async function gerarEvolucaoIA(){
   if(sessoes.length<2){toast('Necessário pelo menos 2 sessões com avaliação IA','err');return;}
   S.loadingEvolucao=true;S.evolucaoIA=null;setTab('timeline');
   const{data:{session}}=await sb.auth.getSession();if(!session)return;
-  const historico=sessoes.map(s=>`Sessão ${s.numero_sessao} (${fmtD(s.data_sessao)}):
-${s.avaliacao_ia.resultado}`).join('
-
----
-
-');
-  const prompt=`Analise a evolução desta paciente de fisioterapia pós-operatória com base nas avaliações abaixo.
-Retorne APENAS um JSON válido (sem markdown, sem texto extra) neste formato exato:
-{"sessoes":[{"n":1,"edema":3,"fibrose":4,"cicatriz":2},...],"resumo":"texto de até 80 palavras sobre a evolução geral"}
-Escala: 1=muito ruim, 5=excelente. Inclua apenas sessões que têm avaliação.
-Avaliações:
-${historico}`;
+  const historico=sessoes.map(s=>'Sessão '+s.numero_sessao+' ('+fmtD(s.data_sessao)+'):\n'+s.avaliacao_ia.resultado).join('\n\n---\n\n');
+  const prompt='Analise a evolução desta paciente de fisioterapia pós-operatória com base nas avaliações abaixo.\nRetorne APENAS um JSON válido (sem markdown) neste formato: {"sessoes":[{"n":1,"edema":3,"fibrose":4,"cicatriz":2}],"resumo":"até 80 palavras"}\nEscala: 1=ruim 5=ótimo. Só sessões com avaliação.\nAvaliações:\n'+historico;
   try{
     const r=await fetch(`${SUPA_URL}/functions/v1/ia-proxy`,{method:'POST',headers:{'Content-Type':'application/json','Authorization':`Bearer ${session.access_token}`},body:JSON.stringify({model:AI_MODEL,max_tokens:512,messages:[{role:'user',content:prompt}]})});
     const d=await r.json();if(!r.ok)throw new Error(d.error);
