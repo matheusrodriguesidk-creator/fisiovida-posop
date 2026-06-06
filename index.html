@@ -2903,10 +2903,33 @@ function closeSb(){
   document.querySelector('.sidebar').classList.remove('open');
   document.getElementById('sb-overlay').classList.remove('open');
 }
-window.onerror=function(msg,src,line,col,err){console.error('Fisiovida JS Error:',msg,'at',src+':'+line+':'+col,err);return false;};
+// ── HANDLER DE ERRO GLOBAL ──
+window.onerror = function(msg, src, line, col, err) {
+  var app = document.getElementById('app');
+  if (app) {
+    app.innerHTML = '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#F2F4F7;padding:20px;font-family:sans-serif">'
+      + '<div style="background:#fff;border-radius:14px;padding:32px;max-width:480px;width:100%;box-shadow:0 4px 24px rgba(0,0,0,0.1);border:1px solid #DDE2EA">'
+      + '<div style="font-size:32px;margin-bottom:12px">⚠️</div>'
+      + '<div style="font-size:18px;font-weight:700;color:#1A1D2E;margin-bottom:8px">Erro ao carregar o app</div>'
+      + '<div style="font-size:13px;color:#DC2626;background:#FEF2F2;border-radius:8px;padding:12px;margin-bottom:12px;word-break:break-all">'
+      + (msg || 'Erro desconhecido') + '</div>'
+      + '<div style="font-size:12px;color:#9AA5B4">Arquivo: ' + (src || '?') + ' linha ' + (line || '?') + '</div>'
+      + '<button onclick="location.reload()" style="margin-top:16px;padding:10px 20px;background:#4fa0d4;color:#fff;border:none;border-radius:8px;font-size:14px;cursor:pointer;width:100%">Tentar novamente</button>'
+      + '</div></div>';
+  }
+  console.error('Fisiovida JS Error:', msg, 'at', src + ':' + line + ':' + col, err);
+  return false;
+};
+
+// ── VERIFICAR SUPORTE DO BROWSER ──
+try {
+  eval('(()=>{let x={}?.a??null;let y=x?.b;})()');
+} catch(e) {
+  document.getElementById('app').innerHTML = '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#F2F4F7;padding:20px;font-family:sans-serif"><div style="background:#fff;border-radius:14px;padding:32px;max-width:400px;width:100%;text-align:center"><div style="font-size:40px;margin-bottom:16px">📱</div><div style="font-size:18px;font-weight:700;margin-bottom:8px">Browser desatualizado</div><div style="font-size:14px;color:#666">Atualize seu browser para a versão mais recente e tente novamente.</div></div></div>';
+}
 
 if('serviceWorker' in navigator){
-  navigator.serviceWorker.register('/sw.js').catch(()=>{});
+  navigator.serviceWorker.register('/sw.js').catch(function(){});
 }
 boot();
 </script>
