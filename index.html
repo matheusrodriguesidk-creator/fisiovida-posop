@@ -413,6 +413,7 @@
 
     @media(max-width:768px){
       .dash-grid{grid-template-columns:1fr!important;}
+      .dash-grid > div:last-child{order:-1;}
     }
 
     /* ── ANAMNESE CHECKBOXES ── */
@@ -1977,6 +1978,24 @@ function rPacCard(p){
 }
 
 // ── AGENDA ──
+function rAgendaItem(e, showDate){
+  const pac=S.pacientes&&S.pacientes.find(function(p){return p.id===e.paciente_id;});
+  const hora=fmtH(e.hora_inicio);
+  const fim=e.hora_fim?(' — '+fmtH(e.hora_fim)):'';
+  const stCls={agendado:'b-p',realizado:'b-acc',cancelado:'b-f1'};
+  const stLbl={agendado:'Agendado',realizado:'Realizado',cancelado:'Cancelado'};
+  return '<div class="agenda-item" onclick="verEvento(\''+e.id+'\')">'
+    +'<div class="agenda-hora">'+hora+'<span>'+fim+'</span></div>'
+    +'<div class="agenda-info">'
+    +'<div class="agenda-titulo">'+escH(e.titulo)+'</div>'
+    +(pac?'<div class="agenda-pac">'+escH(pac.nome)+'</div>':'')
+    +(e.observacoes?'<div class="agenda-obs">'+escH(e.observacoes)+'</div>':'')
+    +'</div>'
+    +'<span class="badge '+( stCls[e.status]||'b-n')+'">'+( stLbl[e.status]||e.status)+'</span>'
+    +'</div>';
+}
+
+
 function rAgenda(){
   const tabs=[['hoje','Hoje'],['semana','Semana'],['mes','Mês']];
   return`<div class="ph">
@@ -2008,13 +2027,13 @@ function rAgContent(){
 
 function rHoje(){
   const hoje=new Date().toISOString().split('T')[0];
-  const evs=S.agenda.filter(e=>e.data===hoje).sort((a,b)=>(a.hora_inicio||'').localeCompare(b.hora_inicio||''));
-  if(!evs.length)return`<div class="hoje-empty">
-    <div class="hoje-empty-icon">📅</div>
-    <div style="font-size:15px;font-weight:600;color:var(--txt2)">Nenhum evento hoje</div>
-    <div style="font-size:13px;color:var(--txt3);margin-top:4px">Clique em "+ Novo Evento" para agendar</div>
-  </div>`;
-  return`<div class="hoje-resumo">${evs.map(e=>rAgendaItem(e,true)).join('')}</div>`;
+  const evs=(S.agenda||[]).filter(function(e){return e.data===hoje;}).sort(function(a,b){return (a.hora_inicio||'').localeCompare(b.hora_inicio||'');});
+  if(!evs.length) return '<div class="hoje-empty"><div class="hoje-empty-icon">&#128197;</div>'
+    +'<div style="font-size:15px;font-weight:600;color:var(--txt2)">Nenhum evento hoje</div>'
+    +'<div style="font-size:13px;color:var(--txt3);margin-top:4px">Clique em &quot;+ Novo Evento&quot; para agendar</div>'
+    +'<button class="btn btn-p btn-sm" style="margin-top:16px" onclick="modalNovoEvento(\'\')">+ Agendar</button>'
+    +'</div>';
+  return '<div class="hoje-resumo">'+evs.map(function(e){return rAgendaItem(e,true);}).join('')+'</div>';
 }
 
 function rSemana(){
