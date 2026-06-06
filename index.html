@@ -1251,14 +1251,12 @@ function previewPDF(docDef, filename){
     '</div>' +
   '</div>');
 
-  pdfMake.createPdf(docDef).getDataUrl(dataUrl=>{
-    const frame=document.getElementById('pdf-frame');
-    const loading=document.getElementById('pdf-loading');
-    if(frame){frame.src=dataUrl;frame.style.display='block';}
-    if(loading)loading.style.display='none';
-    document.getElementById('pdf-dl-btn')?.addEventListener('click',()=>{
-      pdfMake.createPdf(docDef).download(filename);
-    });
+  pdfMake.createPdf(docDef).getBlob(blob=>{
+    closeMo();
+    const url=URL.createObjectURL(blob);
+    const win=window.open(url,'_blank');
+    if(!win){toast('Popup bloqueado — iniciando download','ok');pdfMake.createPdf(docDef).download(filename);}
+    setTimeout(()=>URL.revokeObjectURL(url),60000);
   });
 }
 
@@ -1356,111 +1354,129 @@ async function gerarRelatorioPaciente(){
   const fCorMap={'fase-1':'#E04545','fase-2':'#D4860A','fase-3':'#95bb29'};
   const fNomeMap={'fase-1':'Fase Inflamatoria','fase-2':'Fase Proliferativa','fase-3':'Fase de Remodelamento'};
   const faseKey=fase?.cls?.replace('f','fase-')||'fase-3';
+
+  // Helper: limpar markdown do texto da IA
+  const limparMD=txt=>{
+    if(!txt)return'';
+    return txt
+      .replace(/\*\*([^*]+)\*\*/g,'$1')
+      .replace(/\*([^*]+)\*/g,'$1')
+      .replace(/^#{1,3}\s+/gm,'')
+      .replace(/^[-•]\s+/gm,'- ')
+      .trim();
+  };
+
   const content=[];
 
-  // CABECALHO
+  // ── CABECALHO ──
   const logo=S.config.pdf_logo;
-  content.push({table:{widths:['*'],body:[[{columns:[
-    logo?{image:logo,width:44,height:44,margin:[0,0,10,0]}:{text:''},
+  const clinica=S.config.pdf_clinica||'Fisiovida';
+  content.push({columns:[
+    logo?{image:logo,width:44,height:44}:{text:''},
     {stack:[
-      {text:S.config.pdf_clinica||'Fisiovida',fontSize:fs+8,bold:true,color:'#fff'},
-      {text:'Relatorio de Acompanhamento',fontSize:fs+1,color:'rgba(255,255,255,0.8)',margin:[0,3,0,0]},
-      {text:'Emitido em '+fmtD(new Date().toISOString().split('T')[0]),fontSize:fs-2,color:'rgba(255,255,255,0.6)',margin:[0,2,0,0]}
-    ]}
-  ],margin:[20,16,20,16]}]]},layout:'noBorders',fillColor:cor,margin:[0,0,0,0]});
+      {text:clinica,fontSize:fs+6,bold:true,color:cor},
+      {text:'Relatorio de Acompanhamento',fontSize:fs,color:'#4A5568',margin:[0,2,0,0]},
+      {text:'Emitido em '+fmtD(new Date().toISOString().split('T')[0]),fontSize:fs-2,color:'#9AA5B4',margin:[0,1,0,0]}
+    ],margin:[logo?12:0,0,0,0]},
+    {text:'',width:'*'}
+  ],margin:[0,0,0,8]});
+  content.push({canvas:[{type:'line',x1:0,y1:0,x2:515,y2:0,lineWidth:2,lineColor:cor}],margin:[0,0,0,16]});
 
-  // PACIENTE
-  content.push({table:{widths:['*','auto'],body:[[
-    {stack:[
-      {text:p.nome,fontSize:fs+7,bold:true,color:'#1A1D2E',margin:[0,0,0,4]},
-      {columns:[
-        a.tipo_cirurgia?{text:'Cirurgia: '+a.tipo_cirurgia,fontSize:fs,color:'#4A5568'}:{text:''},
-        a.data_cirurgia?{text:'Data: '+fmtD(a.data_cirurgia),fontSize:fs,color:'#4A5568'}:{text:''}
-      ],columnGap:12},
-      p.telefone?{text:'Tel: '+p.telefone,fontSize:fs-1,color:'#9AA5B4',margin:[0,3,0,0]}:{text:''}
-    ],margin:[16,14,8,14]},
-    {stack:[
-      {text:fNomeMap[faseKey]||'',fontSize:fs-2,bold:true,color:fCorMap[faseKey]||cor,alignment:'center',margin:[0,14,0,2]},
-      fase?{text:'D'+fase.dias+' pos-op',fontSize:fs-3,color:'#9AA5B4',alignment:'center'}:{text:''}
-    ],margin:[8,0,16,14]}
-  ]]},layout:{hLineWidth:()=>0,vLineWidth:()=>0,fillColor:()=>'#F2F4F7'},margin:[0,14,0,14]});
+  // ── DADOS DO PACIENTE ──
+  content.push({text:p.nome,fontSize:fs+5,bold:true,color:'#1A1D2E',margin:[0,0,0,6]});
+  const metaItens=[];
+  if(a.tipo_cirurgia) metaItens.push({text:'Cirurgia: '+a.tipo_cirurgia,fontSize:fs,color:'#4A5568'});
+  if(a.data_cirurgia) metaItens.push({text:'Data cirurgia: '+fmtD(a.data_cirurgia),fontSize:fs,color:'#4A5568'});
+  if(fase) metaItens.push({text:(fNomeMap[faseKey]||'')+' (D'+fase.dias+')',fontSize:fs,bold:true,color:fCorMap[faseKey]||cor});
+  if(a.cirurgiao) metaItens.push({text:'Cirurgiao: '+a.cirurgiao,fontSize:fs,color:'#4A5568'});
+  if(metaItens.length) content.push({columns:metaItens,columnGap:16,margin:[0,0,0,12]});
 
-  // PROGRESSO
+  // ── PROGRESSO ──
   if(pk){
-    const bW=455,filled=Math.round((feitas/Math.max(total,1))*bW);
-    content.push({table:{widths:['*'],body:[[{stack:[
-      {columns:[
-        {text:'Progresso do Pacote',fontSize:fs,bold:true,color:'#1A1D2E',width:'*'},
-        {text:feitas+'/'+total+' sessoes ('+pct+'%)',fontSize:fs,bold:true,color:cor,width:'auto'}
-      ],margin:[0,0,0,8]},
-      {canvas:[
-        {type:'rect',x:0,y:0,w:bW,h:10,r:5,color:'#DDE2EA'},
-        {type:'rect',x:0,y:0,w:filled,h:10,r:5,color:cor}
-      ]}
-    ],margin:[14,14,14,14]}]]},layout:{hLineWidth:()=>0,vLineWidth:()=>0,fillColor:()=>'#F2F4F7'},margin:[0,0,0,18]});
+    const bW=515,filled=Math.round((feitas/Math.max(total,1))*bW);
+    content.push({
+      text:'Progresso: '+feitas+' de '+total+' sessoes ('+pct+'%)',
+      fontSize:fs,bold:true,color:'#1A1D2E',margin:[0,0,0,6]
+    });
+    content.push({canvas:[
+      {type:'rect',x:0,y:0,w:bW,h:8,r:4,color:'#DDE2EA'},
+      {type:'rect',x:0,y:0,w:filled,h:8,r:4,color:cor}
+    ],margin:[0,0,0,18]});
   }
 
-  // GRAFICO
+  // ── GRAFICO ──
   if(cfgPDF.incluir_grafico!==false&&S.evolucaoIA){
     const imgG=graficoParaPDF(S.evolucaoIA);
     if(imgG){
-      content.push({table:{widths:['*'],body:[[{stack:[
-        {text:'Grafico de Evolucao',fontSize:fs+1,bold:true,color:'#1A1D2E',margin:[0,0,0,10]},
-        {image:imgG,width:455},
-        S.evolucaoIA.resumo?{text:S.evolucaoIA.resumo,fontSize:fs-1,color:'#4A5568',italics:true,margin:[0,8,0,0]}:{text:''}
-      ],margin:[14,14,14,14]}]]},layout:{hLineWidth:()=>0,vLineWidth:()=>0,fillColor:()=>'#F2F4F7'},margin:[0,0,0,18]});
+      content.push({canvas:[{type:'line',x1:0,y1:0,x2:515,y2:0,lineWidth:0.5,lineColor:'#DDE2EA'}],margin:[0,0,0,12]});
+      content.push({text:'Grafico de Evolucao',fontSize:fs+1,bold:true,color:'#1A1D2E',margin:[0,0,0,8]});
+      content.push({image:imgG,width:480,margin:[0,0,0,6]});
+      if(S.evolucaoIA.resumo) content.push({text:S.evolucaoIA.resumo,fontSize:fs-1,color:'#4A5568',italics:true,margin:[0,0,0,16]});
     }
   }
 
-  // SESSOES
+  // ── SESSOES ──
   if(sessoes.length){
-    content.push({text:'Historico de Sessoes',fontSize:fs+2,bold:true,color:'#1A1D2E',margin:[0,0,0,12]});
-    sessoes.forEach(s=>{
+    content.push({canvas:[{type:'line',x1:0,y1:0,x2:515,y2:0,lineWidth:0.5,lineColor:'#DDE2EA'}],margin:[0,0,0,14]});
+    content.push({text:'Historico de Sessoes',fontSize:fs+1,bold:true,color:'#1A1D2E',margin:[0,0,0,12]});
+
+    sessoes.forEach((s,idx)=>{
       const procs=Array.isArray(s.procedimentos)?s.procedimentos:JSON.parse(s.procedimentos||'[]');
       const fk=s.fase_cicatrizacao||'fase-3';
       const fCor=fCorMap[fk]||cor;
-      const rows=[];
 
-      // Header da sessao
-      rows.push({columns:[
-        {canvas:[{type:'ellipse',x:14,y:14,r1:13,r2:13,color:fCor}],width:30,margin:[0,2,8,0]},
-        {stack:[
-          {text:'Sessao '+s.numero_sessao,fontSize:fs+1,bold:true,color:'#fff'},
-          {columns:[
-            {text:fmtD(s.data_sessao),fontSize:fs-1,color:'rgba(255,255,255,0.85)'},
-            {text:fNomeMap[fk]||'',fontSize:fs-2,color:'rgba(255,255,255,0.95)',bold:true}
-          ],columnGap:8}
-        ]}
-      ],columnGap:0,fillColor:fCor,margin:[12,8,12,8]});
+      // Linha da sessao
+      content.push({
+        columns:[
+          {text:'Sessao '+s.numero_sessao,fontSize:fs,bold:true,color:cor,width:'auto'},
+          {canvas:[{type:'line',x1:0,y1:5,x2:300,y2:5,lineWidth:0.5,lineColor:'#DDE2EA'}],margin:[8,0,8,0],width:'*'},
+          {text:fmtD(s.data_sessao),fontSize:fs-1,color:'#9AA5B4',width:'auto'},
+          {text:fNomeMap[fk]||'',fontSize:fs-2,bold:true,color:fCor,width:'auto'}
+        ],columnGap:6,margin:[0,0,0,6]
+      });
 
       if(procs.length){
-        rows.push({text:procs.join('  |  '),fontSize:fs-1,color:fCor,bold:true,margin:[12,8,12,s.notas?2:8]});
+        content.push({text:'Procedimentos: '+procs.join(', '),fontSize:fs-1,color:'#4A5568',margin:[0,0,0,4]});
       }
       if(s.notas){
-        rows.push({text:s.notas,fontSize:fs-1,color:'#4A5568',lineHeight:1.5,margin:[12,4,12,s.avaliacao_ia?.resultado&&cfgPDF.incluir_ia!==false?4:10]});
+        content.push({text:'Evolucao: '+s.notas,fontSize:fs-1,color:'#4A5568',lineHeight:1.5,margin:[0,0,0,4]});
       }
       if(cfgPDF.incluir_ia!==false&&s.avaliacao_ia?.resultado){
-        const lines=mdPDF(s.avaliacao_ia.resultado,fs-2);
-        rows.push({table:{widths:['*'],body:[[{stack:lines.length?lines:[{text:s.avaliacao_ia.resultado,fontSize:fs-2}],margin:[10,8,10,8]}]]},
-          layout:{hLineWidth:()=>0,vLineWidth:(i)=>i===0?3:0,vLineColor:()=>cor},margin:[12,0,12,8]});
+        const textoLimpo=limparMD(s.avaliacao_ia.resultado);
+        content.push({
+          text:textoLimpo,
+          fontSize:fs-1,color:'#3a4163',lineHeight:1.6,
+          margin:[0,0,0,4]
+        });
       }
       if(cfgPDF.incluir_fotos!==false&&fotosMap[s.id]?.length){
         const cols=fotosMap[s.id].map(f=>({stack:[
           {image:f.b64,width:100,height:100,fit:[100,100]},
           f.regiao?{text:f.regiao,fontSize:fs-3,color:'#9AA5B4',alignment:'center',margin:[0,2,0,0]}:{text:''}
         ]}));
-        rows.push({columns:cols,columnGap:8,margin:[12,4,12,10]});
+        content.push({columns:cols,columnGap:8,margin:[0,6,0,0]});
       }
 
-      content.push({table:{widths:['*'],body:rows.map(r=>[r])},
-        layout:{hLineWidth:(i,n)=>i===0||i===n.table.body.length?2:0.5,vLineWidth:(i,n)=>i===0||i===n.table.widths.length?2:0,
-          hLineColor:()=>fCor,vLineColor:()=>fCor},margin:[0,0,0,14]});
+      // Separador entre sessoes
+      if(idx<sessoes.length-1){
+        content.push({canvas:[{type:'line',x1:0,y1:0,x2:515,y2:0,lineWidth:0.5,lineColor:'#DDE2EA'}],margin:[0,10,0,10]});
+      }
     });
   }
 
-  content.push(...pdfRodape(cor));
+  // ── RODAPE ──
+  content.push({canvas:[{type:'line',x1:0,y1:0,x2:515,y2:0,lineWidth:1,lineColor:cor}],margin:[0,24,0,12]});
+  content.push({columns:[
+    {text:S.config.pdf_rodape||'',fontSize:fs-2,color:'#9AA5B4',width:'*'},
+    {stack:[
+      {canvas:[{type:'line',x1:30,y1:0,x2:160,y2:0,lineWidth:1,lineColor:'#D4CDC4'}]},
+      {text:S.config.nome_profissional||'Profissional',fontSize:fs-1,bold:true,color:'#1A1D2E',alignment:'center',margin:[0,4,0,0]},
+      {text:S.config.crefito||'',fontSize:fs-2,color:'#4A5568',alignment:'center'}
+    ],width:190}
+  ]});
+
   const pgSize=cfgPDF.pagina||'A4';
-  const mg=[cfgPDF.margem_h||36,cfgPDF.margem_v||36,cfgPDF.margem_h||36,cfgPDF.margem_v||56];
+  const mg=[cfgPDF.margem_h||40,cfgPDF.margem_v||40,cfgPDF.margem_h||40,cfgPDF.margem_v||56];
   previewPDF({pageSize:pgSize,pageMargins:mg,content,styles:pdfStyles(cor),defaultStyle:{font:'Roboto'}},'Relatorio_'+p.nome.replace(/\s+/g,'_')+'.pdf');
 }
 function gerarProntuario(){
