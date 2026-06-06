@@ -14,8 +14,6 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.7/pdfmake.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.7/vfs_fonts.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
@@ -1223,6 +1221,26 @@ async function fotosParaPDF(sessoes,cfgPDF){
 }
 
 
+// ── PDFMAKE LAZY LOADER ──
+let _pdfReady=false;
+function loadPDFMake(){
+  if(_pdfReady&&window.pdfMake) return Promise.resolve();
+  return new Promise((res,rej)=>{
+    const s1=document.createElement('script');
+    s1.src='https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.7/pdfmake.min.js';
+    s1.onload=()=>{
+      const s2=document.createElement('script');
+      s2.src='https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.7/vfs_fonts.js';
+      s2.onload=()=>{_pdfReady=true;res();};
+      s2.onerror=rej;
+      document.head.appendChild(s2);
+    };
+    s1.onerror=rej;
+    document.head.appendChild(s1);
+  });
+}
+
+
 // ── MARKDOWN PARSER ──
 function mdHTML(text){
   if(!text) return '';
@@ -1443,6 +1461,7 @@ async function gerarRelatorioPaciente(){
   const cfgPDF=S.config.pdf_opts||{};
   const fs=cfgPDF.fonte||11;
   toast('Preparando PDF...');
+  await loadPDFMake();
   const fotosMap=await fotosParaPDF(sessoes,cfgPDF);
   const fCorMap={'fase-1':'#E04545','fase-2':'#D4860A','fase-3':'#95bb29'};
   const fNomeMap={'fase-1':'Fase Inflamatoria','fase-2':'Fase Proliferativa','fase-3':'Fase de Remodelamento'};
@@ -2880,6 +2899,8 @@ function closeSb(){
   document.querySelector('.sidebar').classList.remove('open');
   document.getElementById('sb-overlay').classList.remove('open');
 }
+window.onerror=function(msg,src,line,col,err){console.error('Fisiovida JS Error:',msg,'at',src+':'+line+':'+col,err);return false;};
+
 if('serviceWorker' in navigator){
   navigator.serviceWorker.register('/sw.js').catch(()=>{});
 }
