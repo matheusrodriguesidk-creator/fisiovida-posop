@@ -441,10 +441,58 @@ async function img64(file,maxW=800){
 }
 
 // ── AUTH ──
+function restoreSessaoForm(){
+  try{
+    const raw=sessionStorage.getItem('sessao_draft');
+    if(!raw)return;
+    const d=JSON.parse(raw);
+    if(d.pacId!==S.pac?.id)return; // rascunho de outro paciente
+    // Aplicar após render — usa timeout para aguardar DOM
+    setTimeout(()=>{
+      const sdata=document.getElementById('sdata');
+      const snotas=document.getElementById('snotas');
+      if(sdata&&d.data)sdata.value=d.data;
+      if(snotas&&d.notas)snotas.value=d.notas;
+      if(d.procs?.length){
+        document.querySelectorAll('.proc-check input').forEach(el=>{
+          el.checked=d.procs.includes(el.value);
+        });
+      }
+      if(d.data||d.notas||d.procs?.length)toast('Rascunho restaurado','ok');
+    },100);
+  }catch{}
+}
+
 async function boot(){
   const{data:{session}}=await sb.auth.getSession();
-  if(session){S.user=session.user;await loadCfg();await loadPacs();await loadAgenda();nav('dashboard');}
-  else nav('login');
+  if(session){
+    S.user=session.user;
+    await loadCfg();await loadPacs();await loadAgenda();
+    // Restaurar view do hash
+    const hash=window.location.hash.slice(1)||'dashboard';
+    const parts=hash.split('/');
+    const view=parts[0];
+    if(view==='paciente'&&parts[1]){
+      try{
+        await loadPac(parts[1]);
+        S.tab=parts[2]||'timeline';
+        nav('paciente');
+      }catch{nav('dashboard');}
+    } else if(view==='sessao'&&parts[1]){
+      try{
+        await loadPac(parts[1]);
+        restoreSessaoForm();
+        nav('sessao');
+      }catch{nav('dashboard');}
+    } else if(view==='agenda'){
+      S.agView=parts[1]||'hoje';
+      nav('agenda');
+    } else if(view==='configuracoes'){
+      nav('configuracoes');
+    } else {
+      nav('dashboard');
+    }
+  } else nav('login');
   sb.auth.onAuthStateChange((_,s)=>{if(!s&&S.view!=='login')nav('login');});
 }
 async function login(email,pw){
@@ -636,7 +684,17 @@ function gerarProntuario(){
 }
 
 // ── ROUTER ──
-function nav(view,params={}){S.view=view;S.params=params;render();window.scrollTo(0,0);}
+function nav(view,params={}){
+  S.view=view;S.params=params;
+  // Salvar no hash para sobreviver ao reload
+  let hash=view;
+  if(view==='paciente'&&S.pac?.id) hash='paciente/'+S.pac.id+'/'+S.tab;
+  else if(view==='sessao'&&S.pac?.id) hash='sessao/'+S.pac.id;
+  else if(view==='agenda') hash='agenda/'+S.agView;
+  history.replaceState(null,'','#'+hash);
+  render();
+  window.scrollTo(0,0);
+}
 
 // ── RENDER ──
 function render(){
@@ -760,6 +818,7 @@ function setAgView(v){
     const map={hoje:'Hoje',semana:'Semana',mes:'Mês'};
     t.classList.toggle('active',t.textContent===map[v]);
   });
+  history.replaceState(null,'','#agenda/'+v);
 }
 
 function rAgContent(){
@@ -933,6 +992,8 @@ function setTab(t){
   S.tab=t;const el=document.getElementById('tc2');
   if(el){el.innerHTML=rTab();bindTabEvts();}
   document.querySelectorAll('.tab').forEach(el=>{const map={timeline:'Linha',dados:'Dados',anamnese:'Anamnese',pacote:'Pacote'};el.classList.toggle('active',el.textContent.includes(map[t]||t));});
+  // Atualizar hash com aba atual
+  if(S.pac?.id) history.replaceState(null,'','#paciente/'+S.pac.id+'/'+t);
 }
 function rTab(){switch(S.tab){case'timeline':return rTimeline();case'dados':return rDados();case'anamnese':return rAnam();case'pacote':return rPkTab();default:return'';}}
 
@@ -1237,8 +1298,28 @@ function bindSessEvts(){
     const notas=document.getElementById('snotas')?.value?.trim()||'';
     const ia=S.iaResult?{resultado:S.iaResult}:null;
     const btn=document.getElementById('bss');btn.textContent='Salvando…';btn.disabled=true;
-    try{await saveSessao({data_sessao:data,procedimentos:procs,notas,avaliacao_ia:ia});S.iaResult=null;await loadPac(S.pac.id);nav('paciente');}catch(e){toast('Erro: '+e.message,'err');btn.textContent='Salvar Sessão';btn.disabled=false;}
+    try{
+      await saveSessao({data_sessao:data,procedimentos:procs,notas,avaliacao_ia:ia});
+      S.iaResult=null;
+      sessionStorage.removeItem('sessao_draft');
+      await loadPac(S.pac.id);nav('paciente');
+    }catch(e){toast('Erro: '+e.message,'err');btn.textContent='Salvar Sessão';btn.disabled=false;}
   });
+
+  // Salvar rascunho no sessionStorage ao editar campos
+  const saveDraft=()=>{
+    try{
+      sessionStorage.setItem('sessao_draft',JSON.stringify({
+        data:document.getElementById('sdata')?.value||'',
+        notas:document.getElementById('snotas')?.value||'',
+        procs:Array.from(document.querySelectorAll('.proc-check input:checked')).map(e=>e.value),
+        pacId:S.pac?.id||''
+      }));
+    }catch{}
+  };
+  document.getElementById('sdata')?.addEventListener('change',saveDraft);
+  document.getElementById('snotas')?.addEventListener('input',saveDraft);
+  document.querySelectorAll('.proc-check input').forEach(el=>el.addEventListener('change',saveDraft));
 }
 
 function bindCfgEvts(){
