@@ -863,7 +863,18 @@ async function avaliarIA(notas){
 
 // ── PDF ──
 function corPDF(){return S.config.pdf_cor||'#3a4163';}
-function pdfStyles(cor){return{title:{fontSize:20,bold:true,color:cor},subtitle:{fontSize:13,color:'#52525B'},sectionHd:{fontSize:13,bold:true,color:'#18181B',margin:[0,16,0,8]},label:{fontSize:10,bold:true,color:'#A1A1AA'},body:{fontSize:11,color:'#18181B',lineHeight:1.5},assinatura:{fontSize:11,bold:true,color:'#18181B',alignment:'center',margin:[0,6,0,0]},crefito:{fontSize:10,color:'#52525B',alignment:'center'}};}
+function pdfStyles(cor){
+  const fs=S.config.pdf_opts?.fonte||11;
+  return{
+    title:{fontSize:fs+9,bold:true,color:cor},
+    subtitle:{fontSize:fs-2,color:'#52525B'},
+    sectionHd:{fontSize:fs+2,bold:true,color:'#18181B',margin:[0,16,0,8]},
+    label:{fontSize:fs-1,bold:true,color:'#A1A1AA'},
+    body:{fontSize:fs,color:'#18181B',lineHeight:1.5},
+    assinatura:{fontSize:fs,bold:true,color:'#18181B',alignment:'center',margin:[0,6,0,0]},
+    crefito:{fontSize:fs-1,color:'#52525B',alignment:'center'}
+  };
+}
 function pdfHeader(titulo,cor){
   const logo=S.config.pdf_logo;
   const leftCol=logo?{image:logo,width:56,height:56}:{text:S.config.pdf_clinica||'Fisiovida',fontSize:20,bold:true,color:cor,width:200};
@@ -872,6 +883,88 @@ function pdfHeader(titulo,cor){
 function pdfRodape(cor){
   return[{canvas:[{type:'line',x1:0,y1:0,x2:515,y2:0,lineWidth:1,lineColor:'#E4DDD4'}],margin:[0,24,0,14]},{columns:[{text:S.config.pdf_rodape||'',fontSize:10,color:'#A1A1AA',width:'*'},{stack:[{canvas:[{type:'line',x1:40,y1:0,x2:160,y2:0,lineWidth:1,lineColor:'#D4CDC4'}]},{text:S.config.nome_profissional||'Profissional',fontSize:11,bold:true,color:'#18181B',alignment:'center',margin:[0,6,0,0]},{text:S.config.crefito||'',fontSize:10,color:'#52525B',alignment:'center'}],width:200}]}];
 }
+
+// ── GRÁFICO PARA PDF (Canvas → PNG base64) ──
+function graficoParaPDF(dados){
+  if(!dados?.sessoes?.length) return null;
+  const {sessoes} = dados;
+  const W=500, H=200, P={t:24,r:20,b:36,l:40};
+  const iW=W-P.l-P.r, iH=H-P.t-P.b;
+  const n=sessoes.length;
+  const xS=i=>P.l+i*(iW/Math.max(n-1,1));
+  const yS=v=>P.t+iH-((v-1)/4)*iH;
+
+  const c=document.createElement('canvas');
+  c.width=W*2; c.height=H*2;
+  const ctx=c.getContext('2d');
+  ctx.scale(2,2);
+
+  // Fundo branco
+  ctx.fillStyle='#fff';
+  ctx.fillRect(0,0,W,H);
+
+  // Grid e labels Y
+  ctx.strokeStyle='#E2DDE6'; ctx.lineWidth=0.8;
+  ctx.font='9px sans-serif'; ctx.fillStyle='#9AA5B4'; ctx.textAlign='right';
+  [1,2,3,4,5].forEach(v=>{
+    ctx.beginPath(); ctx.moveTo(P.l, yS(v)); ctx.lineTo(W-P.r, yS(v)); ctx.stroke();
+    ctx.fillText(v, P.l-5, yS(v)+3);
+  });
+
+  // Labels X
+  ctx.textAlign='center'; ctx.font='9px sans-serif'; ctx.fillStyle='#9AA5B4';
+  sessoes.forEach((s,i)=>ctx.fillText('S'+s.n, xS(i), H-8));
+
+  // Linhas
+  const series=[
+    {key:'edema',   color:'#4fa0d4', label:'Edema'},
+    {key:'fibrose', color:'#f59e0b', label:'Fibrose'},
+    {key:'cicatriz',color:'#95bb29', label:'Cicatrização'}
+  ];
+
+  series.forEach(({key,color})=>{
+    // Área
+    ctx.beginPath();
+    ctx.moveTo(xS(0), yS(sessoes[0][key]||1));
+    sessoes.slice(1).forEach((s,i)=>ctx.lineTo(xS(i+1), yS(s[key]||1)));
+    ctx.lineTo(xS(n-1), P.t+iH);
+    ctx.lineTo(xS(0), P.t+iH);
+    ctx.closePath();
+    ctx.fillStyle=color+'18';
+    ctx.fill();
+
+    // Linha
+    ctx.beginPath();
+    ctx.strokeStyle=color; ctx.lineWidth=2; ctx.lineJoin='round';
+    sessoes.forEach((s,i)=>{
+      if(i===0) ctx.moveTo(xS(i), yS(s[key]||1));
+      else ctx.lineTo(xS(i), yS(s[key]||1));
+    });
+    ctx.stroke();
+
+    // Pontos
+    sessoes.forEach((s,i)=>{
+      ctx.beginPath();
+      ctx.arc(xS(i), yS(s[key]||1), 3.5, 0, Math.PI*2);
+      ctx.fillStyle=color; ctx.fill();
+      ctx.strokeStyle='#fff'; ctx.lineWidth=1.5; ctx.stroke();
+    });
+  });
+
+  // Legenda
+  let lx=P.l;
+  const ly=10;
+  series.forEach(({color,label})=>{
+    ctx.beginPath(); ctx.arc(lx+4, ly+4, 4, 0, Math.PI*2);
+    ctx.fillStyle=color; ctx.fill();
+    ctx.fillStyle='#52525B'; ctx.font='bold 9px sans-serif'; ctx.textAlign='left';
+    ctx.fillText(label, lx+12, ly+8);
+    lx+=60;
+  });
+
+  return c.toDataURL('image/png');
+}
+
 function gerarRelatorioPaciente(){
   const p=S.pac;if(!p){toast('Nenhum paciente','err');return;}
   const a=p.anamnese?.[0]||{},pk=p.pacotes?.find(pk=>pk.status==='ativo');
@@ -894,8 +987,20 @@ function gerarRelatorioPaciente(){
       content.push({table:{widths:['auto','*'],body:rows},layout:{hLineWidth:(i)=>i===0?0:.5,vLineWidth:()=>0,hLineColor:()=>'#E4DDD4'},margin:[0,0,0,12]});
     });
   }
+  // Gráfico de evolução (se disponível e configurado)
+  const cfgPDF=S.config.pdf_opts||{};
+  if(cfgPDF.incluir_grafico!==false && S.evolucaoIA){
+    const imgGraf=graficoParaPDF(S.evolucaoIA);
+    if(imgGraf){
+      content.push({text:'Gráfico de Evolução',style:'sectionHd'});
+      content.push({image:imgGraf,width:480,margin:[0,0,0,8]});
+      if(S.evolucaoIA.resumo) content.push({text:S.evolucaoIA.resumo,fontSize:11,color:'#52525B',italics:true,margin:[0,0,0,12]});
+    }
+  }
+  const pgSize=cfgPDF.pagina||'A4';
+  const margens=[cfgPDF.margem_h||40,cfgPDF.margem_v||40,cfgPDF.margem_h||40,cfgPDF.margem_v||60];
   content.push(...pdfRodape(cor));
-  pdfMake.createPdf({pageSize:'A4',pageMargins:[40,40,40,60],content,styles:pdfStyles(cor),defaultStyle:{font:'Roboto'}}).download(`Relatorio_${p.nome.replace(/\s+/g,'_')}.pdf`);
+  pdfMake.createPdf({pageSize:pgSize,pageMargins:margens,content,styles:pdfStyles(cor),defaultStyle:{font:'Roboto'}}).download(`Relatorio_${p.nome.replace(/\s+/g,'_')}.pdf`);
 }
 function gerarProntuario(){
   const p=S.pac;if(!p){toast('Nenhum paciente','err');return;}
@@ -920,8 +1025,19 @@ function gerarProntuario(){
       content.push({table:{widths:[120,'*'],body:rows},layout:{hLineWidth:(i)=>i===0?0:.5,vLineWidth:()=>0,hLineColor:()=>'#E4DDD4'},margin:[0,0,0,14]});
     });
   });
+  const cfgPDF2=S.config.pdf_opts||{};
+  if(cfgPDF2.incluir_grafico!==false && S.evolucaoIA){
+    const imgGraf2=graficoParaPDF(S.evolucaoIA);
+    if(imgGraf2){
+      content.push({text:'Gráfico de Evolução',style:'sectionHd'});
+      content.push({image:imgGraf2,width:480,margin:[0,0,0,8]});
+      if(S.evolucaoIA.resumo) content.push({text:S.evolucaoIA.resumo,fontSize:11,color:'#52525B',italics:true,margin:[0,0,0,12]});
+    }
+  }
+  const pgSize2=cfgPDF2.pagina||'A4';
+  const margens2=[cfgPDF2.margem_h||40,cfgPDF2.margem_v||40,cfgPDF2.margem_h||40,cfgPDF2.margem_v||60];
   content.push(...pdfRodape(cor));
-  pdfMake.createPdf({pageSize:'A4',pageMargins:[40,40,40,60],content,styles:pdfStyles(cor),defaultStyle:{font:'Roboto'}}).download(`Prontuario_${p.nome.replace(/\s+/g,'_')}.pdf`);
+  pdfMake.createPdf({pageSize:pgSize2,pageMargins:margens2,content,styles:pdfStyles(cor),defaultStyle:{font:'Roboto'}}).download(`Prontuario_${p.nome.replace(/\s+/g,'_')}.pdf`);
 }
 
 // ── ROUTER ──
@@ -1296,6 +1412,7 @@ function rSessForm(){
 // ── CONFIGURAÇÕES ──
 function rCfg(){
   const c=S.config;
+  const o=c.pdf_opts||{};
   const promptVal=(c.prompt_avaliacao||DEFAULT_PROMPT).replace(/</g,'&lt;').replace(/>/g,'&gt;');
   return`<div class="ph"><div><h1 class="ph-title">Configurações</h1><p class="ph-sub">Profissional, IA, PDF e prompt de avaliação</p></div></div>
   <div class="pc">
@@ -1336,6 +1453,58 @@ function rCfg(){
       <div class="fg2">
         <div class="fg"><label class="fl">Nome da Clínica no PDF</label><input class="fi" id="cpdfclinica" value="${c.pdf_clinica||''}" placeholder="Fisiovida Pós-Operatório"></div>
         <div class="fg"><label class="fl">Rodapé</label><input class="fi" id="cpdfrodape" value="${c.pdf_rodape||''}" placeholder="Documento confidencial"></div>
+      </div>
+    </div>
+
+    <div class="cfg-sec">
+      <div class="cfg-sec-t">⚙ Configurações do PDF</div>
+      <div class="fg3">
+        <div class="fg"><label class="fl">Tamanho da Página</label>
+          <select class="fsel" id="cpdf-pagina">
+            <option value="A4" ${(o.pagina||'A4')==='A4'?'selected':''}>A4 (padrão)</option>
+            <option value="LETTER" ${o.pagina==='LETTER'?'selected':''}>Carta (Letter)</option>
+            <option value="A5" ${o.pagina==='A5'?'selected':''}>A5</option>
+          </select>
+        </div>
+        <div class="fg"><label class="fl">Margem Horizontal</label>
+          <input class="fi" type="number" id="cpdf-mh" value="${o.margem_h||40}" min="10" max="80" style="max-width:100px"> <span style="font-size:12px;color:var(--txt3)">px</span>
+        </div>
+        <div class="fg"><label class="fl">Margem Vertical</label>
+          <input class="fi" type="number" id="cpdf-mv" value="${o.margem_v||40}" min="10" max="80" style="max-width:100px"> <span style="font-size:12px;color:var(--txt3)">px</span>
+        </div>
+      </div>
+      <div class="fg2">
+        <div class="fg"><label class="fl">Tamanho da Fonte Base</label>
+          <select class="fsel" id="cpdf-fonte">
+            <option value="10" ${(o.fonte||11)==10?'selected':''}>10pt — compacto</option>
+            <option value="11" ${(o.fonte||11)==11?'selected':''}>11pt — padrão</option>
+            <option value="12" ${(o.fonte||11)==12?'selected':''}>12pt — legível</option>
+          </select>
+        </div>
+        <div class="fg"><label class="fl">Qualidade das Imagens</label>
+          <select class="fsel" id="cpdf-qualidade">
+            <option value="alta" ${(o.qualidade||'alta')==='alta'?'selected':''}>Alta</option>
+            <option value="media" ${o.qualidade==='media'?'selected':''}>Média</option>
+            <option value="baixa" ${o.qualidade==='baixa'?'selected':''}>Baixa (PDF menor)</option>
+          </select>
+        </div>
+      </div>
+      <div class="fg">
+        <label class="fl">Seções a incluir nos relatórios</label>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:4px">
+          <label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer">
+            <input type="checkbox" id="cpdf-fotos" ${o.incluir_fotos!==false?'checked':''} style="accent-color:var(--accent);width:16px;height:16px">
+            Fotos das sessões
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer">
+            <input type="checkbox" id="cpdf-ia" ${o.incluir_ia!==false?'checked':''} style="accent-color:var(--accent);width:16px;height:16px">
+            Avaliações de cicatrização (IA)
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer">
+            <input type="checkbox" id="cpdf-grafico" ${o.incluir_grafico!==false?'checked':''} style="accent-color:var(--accent);width:16px;height:16px">
+            Gráfico de evolução (quando disponível)
+          </label>
+        </div>
       </div>
     </div>
     <button class="btn btn-p btn-lg" id="bscfg">Salvar Configurações</button>
@@ -1593,7 +1762,17 @@ function bindCfgEvts(){
     reader.readAsDataURL(file);
   });
   document.getElementById('bscfg')?.addEventListener('click',async()=>{
-    const dados={...S.config,nome_profissional:document.getElementById('cn').value.trim(),crefito:document.getElementById('cc').value.trim(),clinica:document.getElementById('ccl').value.trim(),telefone:document.getElementById('ct').value.trim(),endereco:document.getElementById('ce').value.trim(),claude_api_key:document.getElementById('capi').value.trim(),prompt_avaliacao:document.getElementById('cprompt').value.trim(),pdf_cor:document.getElementById('cpdfcor').value,pdf_clinica:document.getElementById('cpdfclinica').value.trim(),pdf_rodape:document.getElementById('cpdfrodape').value.trim()};
+    const dados={...S.config,nome_profissional:document.getElementById('cn').value.trim(),crefito:document.getElementById('cc').value.trim(),clinica:document.getElementById('ccl').value.trim(),telefone:document.getElementById('ct').value.trim(),endereco:document.getElementById('ce').value.trim(),claude_api_key:document.getElementById('capi').value.trim(),prompt_avaliacao:document.getElementById('cprompt').value.trim(),pdf_cor:document.getElementById('cpdfcor').value,pdf_clinica:document.getElementById('cpdfclinica').value.trim(),pdf_rodape:document.getElementById('cpdfrodape').value.trim(),
+      pdf_opts:{
+        pagina:document.getElementById('cpdf-pagina')?.value||'A4',
+        margem_h:parseInt(document.getElementById('cpdf-mh')?.value)||40,
+        margem_v:parseInt(document.getElementById('cpdf-mv')?.value)||40,
+        fonte:parseInt(document.getElementById('cpdf-fonte')?.value)||11,
+        qualidade:document.getElementById('cpdf-qualidade')?.value||'alta',
+        incluir_fotos:document.getElementById('cpdf-fotos')?.checked!==false,
+        incluir_ia:document.getElementById('cpdf-ia')?.checked!==false,
+        incluir_grafico:document.getElementById('cpdf-grafico')?.checked!==false,
+      }};
     try{await saveCfg(dados);render();}catch(e){toast('Erro: '+e.message,'err');}
   });
   document.getElementById('bnprof')?.addEventListener('click',()=>modalEditProf(null));
