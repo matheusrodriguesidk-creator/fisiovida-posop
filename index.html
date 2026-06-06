@@ -469,6 +469,10 @@ const S={
   evolucaoIA:null,loadingEvolucao:false,
 };
 
+if(!window.supabase){
+  // Supabase nao carregou — tentar carregar dinamicamente
+  document.write('<sc'+'ript src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"><\/sc'+'ript>');
+}
 const sb=window.supabase.createClient(SUPA_URL,SUPA_KEY);
 
 async function q(fn){
