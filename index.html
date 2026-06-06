@@ -416,6 +416,14 @@
     @media(max-width:768px){
       .dash-grid{grid-template-columns:1fr!important;}
     }
+
+    /* ── ANAMNESE CHECKBOXES ── */
+    .anam-checks{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;}
+    .anam-check{display:flex;align-items:center;gap:6px;padding:6px 12px;border-radius:20px;border:1.5px solid var(--border);cursor:pointer;font-size:13px;color:var(--txt2);transition:all .15s;user-select:none;}
+    .anam-check input{display:none;}
+    .anam-check:has(input:checked){background:var(--primary-lt);border-color:var(--primary);color:var(--primary-dk);}
+    .anam-outro-wrap{display:none;margin-top:8px;}
+    .anam-outro-wrap.visible{display:block;}
     @keyframes spin{to{transform:rotate(360deg);}}
     @keyframes fi{to{opacity:1;}}
     @keyframes su{from{transform:translateY(16px);opacity:0;}to{transform:translateY(0);opacity:1;}}
@@ -652,7 +660,10 @@ async function gerarEvolucaoIA(){
   const temScores=sessoes.every(s=>s.avaliacao_ia?.scores);
   if(temScores){
     const dadosProntos={
-      sessoes:sessoes.map(s=>({n:s.numero_sessao,...s.avaliacao_ia.scores})),
+      sessoes:sessoes.map(s=>{
+        const sc=s.avaliacao_ia.scores||{};
+        return{n:s.numero_sessao,edema:sc.edema||3,fibrose:sc.fibrose||3,cicatriz:sc.cicatriz||3};
+      }),
       resumo:''
     };
     // Gerar só o resumo
@@ -709,9 +720,10 @@ function rGraficoEvolucao(){
       <button class="btn btn-s btn-sm" onclick="S.evolucaoIA=null;setTab('timeline')">✕</button>
     </div>
     <div class="evol-legend">
-      <div class="evol-leg-item"><div class="evol-leg-dot" style="background:#4fa0d4"></div>Edema</div>
-      <div class="evol-leg-item"><div class="evol-leg-dot" style="background:#f59e0b"></div>Fibrose</div>
-      <div class="evol-leg-item"><div class="evol-leg-dot" style="background:#95bb29"></div>Cicatrização</div>
+      <div class="evol-leg-item"><div class="evol-leg-dot" style="background:#4fa0d4"></div>💧 Edema</div>
+      <div class="evol-leg-item"><div class="evol-leg-dot" style="background:#f59e0b"></div>🔶 Fibrose</div>
+      <div class="evol-leg-item"><div class="evol-leg-dot" style="background:#95bb29"></div>🌿 Cicatrizacao</div>
+      <div style="font-size:10px;color:var(--txt3);margin-left:8px">1=ruim · 5=otimo</div>
     </div>
     ${svg}
     ${resumo?`<div class="evolucao-resumo">💬 ${resumo}</div>`:''}
@@ -1293,82 +1305,124 @@ function previewPDF(docDef, filename){
   });
 }
 
-// ── GRÁFICO PARA PDF (Canvas → PNG base64) ──
+// ── GRÁFICO PARA PDF ──
 function graficoParaPDF(dados){
   if(!dados?.sessoes?.length) return null;
-  const {sessoes} = dados;
-  const W=500, H=200, P={t:24,r:20,b:36,l:40};
-  const iW=W-P.l-P.r, iH=H-P.t-P.b;
+  const {sessoes}=dados;
+  const W=520,H=220,P={t:30,r:24,b:44,l:52};
+  const iW=W-P.l-P.r,iH=H-P.t-P.b;
   const n=sessoes.length;
-  const xS=i=>P.l+i*(iW/Math.max(n-1,1));
-  const yS=v=>P.t+iH-((v-1)/4)*iH;
+  const xS=i=>P.l+(n===1?iW/2:i*(iW/Math.max(n-1,1)));
+  const yS=v=>P.t+iH-((Math.min(Math.max(v,1),5)-1)/4)*iH;
 
   const c=document.createElement('canvas');
-  c.width=W*2; c.height=H*2;
+  c.width=W*2;c.height=H*2;
   const ctx=c.getContext('2d');
   ctx.scale(2,2);
 
-  // Fundo branco
-  ctx.fillStyle='#fff';
-  ctx.fillRect(0,0,W,H);
+  // Fundo com gradiente suave
+  const bg=ctx.createLinearGradient(0,0,0,H);
+  bg.addColorStop(0,'#F8FAFF');bg.addColorStop(1,'#FFFFFF');
+  ctx.fillStyle=bg;ctx.fillRect(0,0,W,H);
 
-  // Grid e labels Y
-  ctx.strokeStyle='#E2DDE6'; ctx.lineWidth=0.8;
-  ctx.font='9px sans-serif'; ctx.fillStyle='#9AA5B4'; ctx.textAlign='right';
+  // Faixas horizontais de zona
+  const zonas=[
+    {min:1,max:2,color:'rgba(224,69,69,0.06)',label:'Ruim'},
+    {min:2,max:3,color:'rgba(212,134,10,0.06)',label:'Regular'},
+    {min:3,max:4,color:'rgba(149,187,41,0.06)',label:'Bom'},
+    {min:4,max:5,color:'rgba(79,160,212,0.08)',label:'Otimo'},
+  ];
+  zonas.forEach(z=>{
+    ctx.fillStyle=z.color;
+    ctx.fillRect(P.l,yS(z.max+1),iW,yS(z.min)-yS(z.max+1));
+  });
+
+  // Grid horizontal
+  ctx.setLineDash([3,4]);ctx.strokeStyle='#DDE2EA';ctx.lineWidth=0.7;
   [1,2,3,4,5].forEach(v=>{
-    ctx.beginPath(); ctx.moveTo(P.l, yS(v)); ctx.lineTo(W-P.r, yS(v)); ctx.stroke();
-    ctx.fillText(v, P.l-5, yS(v)+3);
+    ctx.beginPath();ctx.moveTo(P.l,yS(v));ctx.lineTo(W-P.r,yS(v));ctx.stroke();
+  });
+  ctx.setLineDash([]);
+
+  // Labels Y com ícone de qualidade
+  const yLabels={1:'😞',2:'😐',3:'🙂',4:'😊',5:'🌟'};
+  ctx.font='11px sans-serif';ctx.textAlign='right';
+  [1,2,3,4,5].forEach(v=>{
+    ctx.fillStyle='#9AA5B4';
+    ctx.fillText(yLabels[v],P.l-6,yS(v)+4);
   });
 
   // Labels X
-  ctx.textAlign='center'; ctx.font='9px sans-serif'; ctx.fillStyle='#9AA5B4';
-  sessoes.forEach((s,i)=>ctx.fillText('S'+s.n, xS(i), H-8));
+  ctx.textAlign='center';ctx.font='bold 9px sans-serif';ctx.fillStyle='#4A5568';
+  sessoes.forEach((s,i)=>ctx.fillText('S'+s.n,xS(i),H-10));
 
-  // Linhas
+  // Séries
   const series=[
-    {key:'edema',   color:'#4fa0d4', label:'Edema'},
-    {key:'fibrose', color:'#f59e0b', label:'Fibrose'},
-    {key:'cicatriz',color:'#95bb29', label:'Cicatrização'}
+    {key:'edema',   color:'#4fa0d4',emoji:'💧'},
+    {key:'fibrose', color:'#f59e0b',emoji:'🔶'},
+    {key:'cicatriz',color:'#95bb29',emoji:'🌿'}
   ];
 
   series.forEach(({key,color})=>{
-    // Área
-    ctx.beginPath();
-    ctx.moveTo(xS(0), yS(sessoes[0][key]||1));
-    sessoes.slice(1).forEach((s,i)=>ctx.lineTo(xS(i+1), yS(s[key]||1)));
-    ctx.lineTo(xS(n-1), P.t+iH);
-    ctx.lineTo(xS(0), P.t+iH);
-    ctx.closePath();
-    ctx.fillStyle=color+'18';
-    ctx.fill();
+    const pts=sessoes.map((s,i)=>({x:xS(i),y:yS(s[key]||3)}));
 
-    // Linha
+    // Área preenchida com gradiente
+    const grad=ctx.createLinearGradient(0,P.t,0,P.t+iH);
+    grad.addColorStop(0,color+'40');grad.addColorStop(1,color+'05');
     ctx.beginPath();
-    ctx.strokeStyle=color; ctx.lineWidth=2; ctx.lineJoin='round';
-    sessoes.forEach((s,i)=>{
-      if(i===0) ctx.moveTo(xS(i), yS(s[key]||1));
-      else ctx.lineTo(xS(i), yS(s[key]||1));
-    });
+    ctx.moveTo(pts[0].x,pts[0].y);
+    if(pts.length>1){
+      // Curva suave (bezier)
+      for(let i=1;i<pts.length;i++){
+        const cx=(pts[i-1].x+pts[i].x)/2;
+        ctx.bezierCurveTo(cx,pts[i-1].y,cx,pts[i].y,pts[i].x,pts[i].y);
+      }
+    }
+    ctx.lineTo(pts[pts.length-1].x,P.t+iH);
+    ctx.lineTo(pts[0].x,P.t+iH);
+    ctx.closePath();
+    ctx.fillStyle=grad;ctx.fill();
+
+    // Linha suave
+    ctx.beginPath();
+    ctx.strokeStyle=color;ctx.lineWidth=2.5;ctx.lineJoin='round';ctx.lineCap='round';
+    ctx.moveTo(pts[0].x,pts[0].y);
+    if(pts.length>1){
+      for(let i=1;i<pts.length;i++){
+        const cx=(pts[i-1].x+pts[i].x)/2;
+        ctx.bezierCurveTo(cx,pts[i-1].y,cx,pts[i].y,pts[i].x,pts[i].y);
+      }
+    }
     ctx.stroke();
 
-    // Pontos
-    sessoes.forEach((s,i)=>{
-      ctx.beginPath();
-      ctx.arc(xS(i), yS(s[key]||1), 3.5, 0, Math.PI*2);
-      ctx.fillStyle=color; ctx.fill();
-      ctx.strokeStyle='#fff'; ctx.lineWidth=1.5; ctx.stroke();
+    // Pontos com valor
+    pts.forEach((pt,i)=>{
+      const v=sessoes[i][key]||3;
+      // Sombra
+      ctx.shadowColor=color+'60';ctx.shadowBlur=6;
+      ctx.beginPath();ctx.arc(pt.x,pt.y,5,0,Math.PI*2);
+      ctx.fillStyle=color;ctx.fill();
+      ctx.shadowBlur=0;
+      // Borda branca
+      ctx.beginPath();ctx.arc(pt.x,pt.y,5,0,Math.PI*2);
+      ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.stroke();
+      // Valor acima do ponto
+      ctx.font='bold 8px sans-serif';ctx.fillStyle=color;ctx.textAlign='center';
+      ctx.fillText(v,pt.x,pt.y-9);
     });
   });
 
-  // Legenda
+  // Legenda compacta no topo
+  ctx.shadowBlur=0;
+  const legItems=[['💧 Edema','#4fa0d4'],['🔶 Fibrose','#f59e0b'],['🌿 Cicatriz','#95bb29']];
   let lx=P.l;
-  const ly=10;
-  series.forEach(({color,label})=>{
-    ctx.beginPath(); ctx.arc(lx+4, ly+4, 4, 0, Math.PI*2);
-    ctx.fillStyle=color; ctx.fill();
-    ctx.fillStyle='#52525B'; ctx.font='bold 9px sans-serif'; ctx.textAlign='left';
-    ctx.fillText(label, lx+12, ly+8);
-    lx+=60;
+  const ly=13;
+  legItems.forEach(([label,color])=>{
+    ctx.beginPath();ctx.arc(lx+4,ly,4,0,Math.PI*2);
+    ctx.fillStyle=color;ctx.fill();
+    ctx.fillStyle='#52525B';ctx.font='bold 8px sans-serif';ctx.textAlign='left';
+    ctx.fillText(label,lx+11,ly+3);
+    lx+=75;
   });
 
   return c.toDataURL('image/png');
@@ -2124,7 +2178,85 @@ function rTimeline(){
 function rDados(){const p=S.pac;return`<div class="card"><div class="card-hd"><div class="card-t">Dados Pessoais</div><button class="btn btn-s btn-sm" onclick="modalEditPac()">Editar</button></div><div class="dr"><span class="dr-lbl">Nome</span><span class="dr-val">${p.nome}</span></div><div class="dr"><span class="dr-lbl">Nascimento</span><span class="dr-val">${fmtD(p.data_nascimento)}</span></div><div class="dr"><span class="dr-lbl">Telefone</span><span class="dr-val">${p.telefone||'—'}</span></div><div class="dr"><span class="dr-lbl">E-mail</span><span class="dr-val">${p.email||'—'}</span></div></div>`;}
 function rAnam(){
   const a=S.pac?.anamnese?.[0]||{};
-  if(S.editAnam)return`<div class="card"><div class="card-hd"><div class="card-t">Anamnese</div></div><div class="fg2"><div class="fg"><label class="fl">Tipo de Cirurgia</label><input class="fi" id="at" value="${a.tipo_cirurgia||''}"></div><div class="fg"><label class="fl">Data da Cirurgia</label><input class="fi" type="date" id="ad" value="${a.data_cirurgia||''}"></div></div><div class="fg"><label class="fl">Cirurgião</label><input class="fi" id="ac" value="${a.cirurgiao||''}"></div><div class="fg"><label class="fl">Histórico Relevante</label><textarea class="fta" id="ah">${a.historico||''}</textarea></div><div class="fg"><label class="fl">Contraindicações</label><textarea class="fta" id="acx" style="min-height:72px">${a.contraindicacoes||''}</textarea></div><div class="fg"><label class="fl">Observações</label><textarea class="fta" id="ao" style="min-height:72px">${a.observacoes||''}</textarea></div><div class="flex gap8"><button class="btn btn-p" id="bsa">Salvar</button><button class="btn btn-s" onclick="S.editAnam=false;setTab('anamnese')">Cancelar</button></div></div>`;
+  const COMORBS=['Diabetes','Hipertensao','Obesidade','Tabagismo','Cardiopatia','Coagulopatia','Hipotireoidismo','Depressao/Ansiedade','Cicatriz queloide'];
+  const ANES_TIPOS=['Local','Sedacao','Raquidiana','Peridural','Geral'];
+  const comorbSalvas=(a.comorbidades||'').split(',').map(x=>x.trim()).filter(Boolean);
+  const makeChecks=(items,campo,salvas)=>items.map(item=>`
+    <label class="anam-check">
+      <input type="checkbox" name="${campo}" value="${item}" ${salvas.includes(item)?'checked':''}> ${item}
+    </label>`).join('')+`
+    <label class="anam-check" id="${campo}-outro-lbl">
+      <input type="checkbox" name="${campo}" value="__outro__" ${salvas.some(x=>!items.includes(x))?'checked':''}> Outro
+    </label>
+    <div class="anam-outro-wrap ${salvas.some(x=>!items.includes(x))?'visible':''}" id="${campo}-outro-wrap">
+      <input class="fi" id="${campo}-outro-txt" placeholder="Especifique..." value="${salvas.filter(x=>!items.includes(x)).join(', ')}" style="max-width:280px">
+    </div>`;
+
+  if(S.editAnam)return`<div class="card"><div class="card-hd"><div class="card-t">Anamnese</div></div>
+
+    <div style="font-size:12px;font-weight:700;color:var(--txt3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px">Cirurgia</div>
+    <div class="fg2">
+      <div class="fg"><label class="fl">Tipo de Cirurgia</label><input class="fi" id="at" value="${a.tipo_cirurgia||''}"></div>
+      <div class="fg"><label class="fl">Data da Cirurgia</label><input class="fi" type="date" id="ad" value="${a.data_cirurgia||''}"></div>
+    </div>
+    <div class="fg2">
+      <div class="fg"><label class="fl">Cirurgiao Responsavel</label><input class="fi" id="ac" value="${a.cirurgiao||''}"></div>
+      <div class="fg"><label class="fl">CRM do Cirurgiao</label><input class="fi" id="acrm" value="${a.cirurgiao_crm||''}"></div>
+    </div>
+    <div class="fg">
+      <label class="fl">Tipo de Anestesia</label>
+      <div class="anam-checks">${ANES_TIPOS.map(t=>`<label class="anam-check"><input type="radio" name="anestesia" value="${t}" ${a.anestesia===t?'checked':''}> ${t}</label>`).join('')}</div>
+    </div>
+    <div class="fg2">
+      <div class="fg"><label class="fl">Cirurgia Previa? </label>
+        <select class="fsel" id="acirprev"><option value="">Nao</option><option value="sim" ${a.cirurgia_previa?'selected':''}>Sim</option></select>
+      </div>
+      <div class="fg"><label class="fl">Qual cirurgia previa</label><input class="fi" id="acirprevdet" value="${a.cirurgia_previa||''}" placeholder="Descreva se houver"></div>
+    </div>
+
+    <div style="height:1px;background:var(--border);margin:16px 0"></div>
+    <div style="font-size:12px;font-weight:700;color:var(--txt3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px">Saude Geral</div>
+
+    <div class="fg">
+      <label class="fl">Comorbidades</label>
+      <div class="anam-checks" id="comorbidades-checks">${makeChecks(COMORBS,'comorbidades',comorbSalvas)}</div>
+    </div>
+    <div class="fg2">
+      <div class="fg"><label class="fl">Medicamentos em uso</label><textarea class="fta" id="ameds" style="min-height:64px">${a.medicamentos||''}</textarea></div>
+      <div class="fg"><label class="fl">Alergias</label><textarea class="fta" id="aalerg" style="min-height:64px">${a.alergias||''}</textarea></div>
+    </div>
+    <div class="fg2">
+      <div class="fg"><label class="fl">Peso atual (kg)</label><input class="fi" type="number" id="apeso" value="${a.peso||''}" placeholder="ex: 72"></div>
+      <div class="fg"><label class="fl">Altura (cm)</label><input class="fi" type="number" id="aaltura" value="${a.altura||''}" placeholder="ex: 165"></div>
+    </div>
+
+    <div style="height:1px;background:var(--border);margin:16px 0"></div>
+    <div style="font-size:12px;font-weight:700;color:var(--txt3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px">Pos-Operatorio</div>
+
+    <div class="fg2">
+      <div class="fg"><label class="fl">Drenos? </label>
+        <select class="fsel" id="adrenos"><option value="">Nao</option><option value="sim" ${a.drenos?'selected':''}>Sim</option></select>
+      </div>
+      <div class="fg"><label class="fl">Qtd. drenos / detalhes</label><input class="fi" id="adrenosdet" value="${a.drenos||''}" placeholder="ex: 2 drenos blake"></div>
+    </div>
+    <div class="fg2">
+      <div class="fg"><label class="fl">Retirada de pontos prevista</label><input class="fi" type="date" id="apontos" value="${a.data_pontos||''}"></div>
+      <div class="fg"><label class="fl">Uso de cinta compressiva</label>
+        <select class="fsel" id="acinta"><option value="">Nao informado</option><option value="sim" ${a.cinta==='sim'?'selected':''}>Sim</option><option value="nao" ${a.cinta==='nao'?'selected':''}>Nao</option></select>
+      </div>
+    </div>
+
+    <div style="height:1px;background:var(--border);margin:16px 0"></div>
+    <div class="fg"><label class="fl">Historico Clinico Relevante</label><textarea class="fta" id="ah">${a.historico||''}</textarea></div>
+    <div class="fg"><label class="fl">Contraindicacoes / Alertas</label><textarea class="fta" id="acx" style="min-height:72px">${a.contraindicacoes||''}</textarea></div>
+    <div class="fg"><label class="fl">Expectativa do Paciente</label><textarea class="fta" id="aexp" style="min-height:64px" placeholder="O que o paciente espera do tratamento?">${a.expectativa||''}</textarea></div>
+    <div class="fg"><label class="fl">Observacoes</label><textarea class="fta" id="ao" style="min-height:64px">${a.observacoes||''}</textarea></div>
+
+    <div class="flex gap8">
+      <button class="btn btn-p" id="bsa">Salvar Anamnese</button>
+      <button class="btn btn-s" onclick="S.editAnam=false;setTab('anamnese')">Cancelar</button>
+    </div>
+  </div>`;
   return`<div class="card"><div class="card-hd"><div class="card-t">Anamnese</div><button class="btn btn-s btn-sm" onclick="S.editAnam=true;setTab('anamnese')">Editar</button></div><div class="dr"><span class="dr-lbl">Cirurgia</span><span class="dr-val">${a.tipo_cirurgia||'—'}</span></div><div class="dr"><span class="dr-lbl">Data</span><span class="dr-val">${fmtD(a.data_cirurgia)}</span></div><div class="dr"><span class="dr-lbl">Cirurgião</span><span class="dr-val">${a.cirurgiao||'—'}</span></div><div class="dr"><span class="dr-lbl">Histórico</span><span class="dr-val" style="white-space:pre-wrap">${a.historico||'—'}</span></div><div class="dr"><span class="dr-lbl">Contraindicações</span><span class="dr-val" style="white-space:pre-wrap;color:${a.contraindicacoes?'#DC2626':'inherit'}">${a.contraindicacoes||'Nenhuma'}</span></div><div class="dr"><span class="dr-lbl">Observações</span><span class="dr-val" style="white-space:pre-wrap">${a.observacoes||'—'}</span></div></div>`;
 }
 function rPkTab(){
@@ -2516,7 +2648,43 @@ function navSemana(d,reset=false){
 
 function bindTabEvts(){
   document.getElementById('bsa')?.addEventListener('click',async()=>{
-    try{await saveAnam({tipo_cirurgia:document.getElementById('at').value.trim(),data_cirurgia:document.getElementById('ad').value||null,cirurgiao:document.getElementById('ac').value.trim(),historico:document.getElementById('ah').value.trim(),contraindicacoes:document.getElementById('acx').value.trim(),observacoes:document.getElementById('ao').value.trim()});S.editAnam=false;setTab('anamnese');}catch(e){toast('Erro: '+e.message,'err');}
+    // Coletar comorbidades incluindo "outro"
+    const comorbChecks=Array.from(document.querySelectorAll('input[name="comorbidades"]:checked'))
+      .map(el=>el.value).filter(v=>v!=='__outro__');
+    const outroComorbTxt=(document.getElementById('comorbidades-outro-txt')?.value||'').trim();
+    if(outroComorbTxt) outroComorbTxt.split(',').map(x=>x.trim()).filter(Boolean).forEach(x=>comorbChecks.push(x));
+    const anestesia=document.querySelector('input[name="anestesia"]:checked')?.value||'';
+    const dados={
+      tipo_cirurgia:document.getElementById('at')?.value.trim()||null,
+      data_cirurgia:document.getElementById('ad')?.value||null,
+      cirurgiao:document.getElementById('ac')?.value.trim()||null,
+      cirurgiao_crm:document.getElementById('acrm')?.value.trim()||null,
+      anestesia,
+      cirurgia_previa:document.getElementById('acirprevdet')?.value.trim()||null,
+      comorbidades:comorbChecks.join(', ')||null,
+      medicamentos:document.getElementById('ameds')?.value.trim()||null,
+      alergias:document.getElementById('aalerg')?.value.trim()||null,
+      peso:document.getElementById('apeso')?.value||null,
+      altura:document.getElementById('aaltura')?.value||null,
+      drenos:document.getElementById('adrenosdet')?.value.trim()||null,
+      data_pontos:document.getElementById('apontos')?.value||null,
+      cinta:document.getElementById('acinta')?.value||null,
+      historico:document.getElementById('ah')?.value.trim()||null,
+      contraindicacoes:document.getElementById('acx')?.value.trim()||null,
+      expectativa:document.getElementById('aexp')?.value.trim()||null,
+      observacoes:document.getElementById('ao')?.value.trim()||null,
+    };
+    try{await saveAnam(dados);S.editAnam=false;setTab('anamnese');}catch(e){toast('Erro: '+e.message,'err');}
+    // Toggle "outro"
+  });
+  // Toggle "outro" em checkboxes de comorbidades
+  document.querySelectorAll('input[name="comorbidades"]').forEach(el=>{
+    if(el.value==='__outro__'){
+      el.addEventListener('change',()=>{
+        const w=document.getElementById('comorbidades-outro-wrap');
+        if(w) w.classList.toggle('visible',el.checked);
+      });
+    }
   });
   document.getElementById('bnpk')?.addEventListener('click',modalNovoPk);
 }
@@ -2540,7 +2708,10 @@ function bindSessEvts(){
   });
   document.getElementById('bss')?.addEventListener('click',async()=>{
     const data=document.getElementById('sdata')?.value;if(!data){toast('Informe a data','err');return;}
-    const procs=Array.from(document.querySelectorAll('.proc-check input:checked')).map(e=>e.value);
+    const procs=Array.from(document.querySelectorAll('.proc-check input:checked'))
+      .map(e=>e.value).filter(v=>v!=='__outro__');
+    const outroProc=(document.getElementById('proc-outro-txt')?.value||'').trim();
+    if(outroProc&&document.getElementById('proc-outro-check')?.checked) procs.push(outroProc);
     const notas=document.getElementById('snotas')?.value?.trim()||'';
     const ia=S.iaResult?{resultado:S.iaResult.resultado||S.iaResult,scores:S.iaResult.scores||null}:null;
     const btn=document.getElementById('bss');btn.textContent='Salvando…';btn.disabled=true;
@@ -2566,6 +2737,11 @@ function bindSessEvts(){
   document.getElementById('sdata')?.addEventListener('change',saveDraft);
   document.getElementById('snotas')?.addEventListener('input',saveDraft);
   document.querySelectorAll('.proc-check input').forEach(el=>el.addEventListener('change',saveDraft));
+  // Toggle "outro" em procedimentos
+  document.getElementById('proc-outro-check')?.addEventListener('change',e=>{
+    const w=document.getElementById('proc-outro-wrap');
+    if(w) w.classList.toggle('visible',e.target.checked);
+  });
 }
 
 function bindCfgEvts(){
