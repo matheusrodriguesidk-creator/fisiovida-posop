@@ -568,17 +568,39 @@ async function gerarEvolucaoIA(){
   const pk=S.pac?.pacotes?.find(p=>p.status==='ativo');
   const sessoes=(pk?.sessoes||[]).filter(s=>s.avaliacao_ia?.resultado).sort((a,b)=>new Date(a.data_sessao)-new Date(b.data_sessao));
   if(sessoes.length<2){toast('Necessário pelo menos 2 sessões com avaliação IA','err');return;}
+
+  // Usar scores já salvos se disponíveis (evita chamada extra à IA)
+  const temScores=sessoes.every(s=>s.avaliacao_ia?.scores);
+  if(temScores){
+    const dadosProntos={
+      sessoes:sessoes.map(s=>({n:s.numero_sessao,...s.avaliacao_ia.scores})),
+      resumo:''
+    };
+    // Gerar só o resumo
+    S.loadingEvolucao=true;S.evolucaoIA=dadosProntos;setTab('timeline');
+    const{data:{session}}=await sb.auth.getSession();if(!session)return;
+    try{
+      const historico=sessoes.map(s=>'S'+s.numero_sessao+': '+s.avaliacao_ia.resultado).join(' | ');
+      const r=await fetch(`${SUPA_URL}/functions/v1/ia-proxy`,{method:'POST',headers:{'Content-Type':'application/json','Authorization':`Bearer ${session.access_token}`},body:JSON.stringify({model:AI_MODEL,max_tokens:150,messages:[{role:'user',content:'Resuma em 60 palavras a evolução desta paciente de pós-op: '+historico}]})});
+      const d=await r.json();
+      dadosProntos.resumo=d.content?.[0]?.text||'';
+      S.evolucaoIA={...dadosProntos};
+    }catch{}
+    S.loadingEvolucao=false;setTab('timeline');
+    return;
+  }
+
+  // Fallback: pedir scores completos à IA
   S.loadingEvolucao=true;S.evolucaoIA=null;setTab('timeline');
   const{data:{session}}=await sb.auth.getSession();if(!session)return;
   const historico=sessoes.map(s=>'Sessão '+s.numero_sessao+' ('+fmtD(s.data_sessao)+'):\n'+s.avaliacao_ia.resultado).join('\n\n---\n\n');
-  const prompt='Analise a evolução desta paciente de fisioterapia pós-operatória com base nas avaliações abaixo.\nRetorne APENAS um JSON válido (sem markdown) neste formato: {"sessoes":[{"n":1,"edema":3,"fibrose":4,"cicatriz":2}],"resumo":"até 80 palavras"}\nEscala: 1=ruim 5=ótimo. Só sessões com avaliação.\nAvaliações:\n'+historico;
+  const prompt='Analise a evolução desta paciente de fisioterapia pós-operatória com base nas avaliações abaixo.\nRetorne APENAS um JSON válido (sem markdown) neste formato: {"sessoes":[{"n":1,"edema":3,"fibrose":4,"cicatriz":2}],"resumo":"até 60 palavras"}\nEscala: 1=ruim 5=ótimo.\nAvaliações:\n'+historico;
   try{
     const r=await fetch(`${SUPA_URL}/functions/v1/ia-proxy`,{method:'POST',headers:{'Content-Type':'application/json','Authorization':`Bearer ${session.access_token}`},body:JSON.stringify({model:AI_MODEL,max_tokens:512,messages:[{role:'user',content:prompt}]})});
     const d=await r.json();if(!r.ok)throw new Error(d.error);
     const txt=d.content?.[0]?.text||'';
-    const json=JSON.parse(txt.replace(/```json?|```/g,'').trim());
-    S.evolucaoIA=json;
-  }catch(e){toast('Erro ao gerar gráfico: '+e.message,'err');}
+    S.evolucaoIA=JSON.parse(txt.replace(/```json?|```/g,'').trim());
+  }catch(e){toast('Erro: '+e.message,'err');}
   S.loadingEvolucao=false;setTab('timeline');
 }
 
@@ -697,6 +719,128 @@ function copiarMsg(i){
   });
 }
 
+
+// ── SLIDER ANTES/DEPOIS ──
+function modalSliderAntesDepois(){
+  const pk=S.pac?.pacotes?.find(p=>p.status==='ativo');
+  const sessoes=(pk?.sessoes||[]).sort((a,b)=>new Date(a.data_sessao)-new Date(b.data_sessao));
+  const primeiraFoto=sessoes.find(s=>s.fotos_sessao?.length)?.fotos_sessao?.[0];
+  const ultimaSessao=[...sessoes].reverse().find(s=>s.fotos_sessao?.length);
+  const ultimaFoto=ultimaSessao?.fotos_sessao?.[0];
+  if(!primeiraFoto||!ultimaFoto||primeiraFoto.url===ultimaFoto.url){
+    toast('Necessário pelo menos 2 sessões com fotos','err');return;
+  }
+  const o=modal(`<div class="mo-box" style="max-width:640px">
+    <div class="mo-hd"><div class="mo-t">📸 Antes × Depois</div><button class="mo-cls" onclick="closeMo()">✕</button></div>
+    <div class="slider-wrap" id="slw" style="height:340px;background:#000">
+      <div class="slider-before" style="height:100%">
+        <img src="${primeiraFoto.url}" style="width:100%;height:100%;object-fit:cover">
+        <span class="slider-label slider-label-l">Sessão 1</span>
+      </div>
+      <div class="slider-after" id="sla" style="clip-path:inset(0 50% 0 0)">
+        <img src="${ultimaFoto.url}">
+        <span class="slider-label slider-label-r">Sessão ${ultimaSessao.numero_sessao}</span>
+      </div>
+      <div class="slider-handle" id="slh" style="left:50%"></div>
+    </div>
+    <div style="font-size:12px;color:var(--txt3);text-align:center;margin-top:10px">← Arraste para comparar →</div>
+  </div>`);
+
+  const wrap=document.getElementById('slw');
+  const after=document.getElementById('sla');
+  const handle=document.getElementById('slh');
+  let drag=false;
+
+  const setPos=x=>{
+    const rect=wrap.getBoundingClientRect();
+    const pct=Math.max(0,Math.min(100,(x-rect.left)/rect.width*100));
+    handle.style.left=pct+'%';
+    after.style.clipPath=`inset(0 ${100-pct}% 0 0)`;
+  };
+
+  wrap.addEventListener('mousedown',e=>{drag=true;setPos(e.clientX);});
+  wrap.addEventListener('touchstart',e=>{drag=true;setPos(e.touches[0].clientX);},{passive:true});
+  document.addEventListener('mousemove',e=>{if(drag)setPos(e.clientX);});
+  document.addEventListener('touchmove',e=>{if(drag)setPos(e.touches[0].clientX);},{passive:true});
+  document.addEventListener('mouseup',()=>drag=false);
+  document.addEventListener('touchend',()=>drag=false);
+}
+
+// ── RELATÓRIO DE ALTA ──
+async function gerarRelatorioAlta(){
+  const p=S.pac;if(!p){toast('Nenhum paciente','err');return;}
+  const a=p.anamnese?.[0]||{};
+  const pk=p.pacotes?.find(pk=>pk.status==='ativo')||p.pacotes?.[p.pacotes.length-1];
+  const sessoes=(pk?.sessoes||[]).sort((x,y)=>new Date(x.data_sessao)-new Date(y.data_sessao));
+  const cor=corPDF();
+  const cfgPDF=S.config.pdf_opts||{};
+  toast('Gerando relatório de alta…');
+
+  const content=[...pdfHeader('Relatório de Alta — Tratamento Concluído',cor)];
+
+  // Faixa destacada
+  content.push({table:{widths:['*'],body:[[{text:'✓ Pacote concluído com sucesso',fontSize:14,bold:true,color:'#fff',fillColor:cor,alignment:'center',margin:[0,12,0,12]}]]},layout:'noBorders',margin:[0,0,0,20]});
+
+  // Dados do paciente
+  content.push({text:p.nome,fontSize:20,bold:true,color:'#18181B',margin:[0,0,0,4]});
+  content.push({columns:[
+    a.tipo_cirurgia?{text:'✂ '+a.tipo_cirurgia,fontSize:11,color:'#52525B'}:{text:''},
+    a.data_cirurgia?{text:'Cirurgia: '+fmtD(a.data_cirurgia),fontSize:11,color:'#52525B'}:{text:''},
+    {text:'Total: '+sessoes.length+' sessões',fontSize:11,bold:true,color:cor}
+  ],margin:[0,0,0,16]});
+
+  // Período de tratamento
+  if(sessoes.length){
+    const ini=fmtD(sessoes[0].data_sessao),fim=fmtD(sessoes[sessoes.length-1].data_sessao);
+    content.push({text:'Período do Tratamento',style:'sectionHd'});
+    content.push({text:ini+' a '+fim,fontSize:12,color:'#52525B',margin:[0,0,0,12]});
+  }
+
+  // Evolução geral
+  if(S.evolucaoIA?.resumo){
+    content.push({text:'Evolução do Tratamento',style:'sectionHd'});
+    content.push({text:S.evolucaoIA.resumo,fontSize:11,color:'#52525B',italics:true,margin:[0,0,0,8]});
+    const imgGraf=graficoParaPDF(S.evolucaoIA);
+    if(imgGraf)content.push({image:imgGraf,width:460,margin:[0,0,0,16]});
+  }
+
+  // Procedimentos mais realizados
+  const contagem={};
+  sessoes.forEach(s=>{(Array.isArray(s.procedimentos)?s.procedimentos:JSON.parse(s.procedimentos||'[]')).forEach(p=>{contagem[p]=(contagem[p]||0)+1;});});
+  const topProcs=Object.entries(contagem).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  if(topProcs.length){
+    content.push({text:'Principais Procedimentos',style:'sectionHd'});
+    content.push({ul:topProcs.map(([p,n])=>p+' ('+n+'x)'),fontSize:11,color:'#52525B',margin:[0,0,0,16]});
+  }
+
+  // Última avaliação IA
+  const ultimaIA=[...sessoes].reverse().find(s=>s.avaliacao_ia?.resultado);
+  if(ultimaIA){
+    content.push({text:'Avaliação Final da Cicatrização',style:'sectionHd'});
+    content.push({text:ultimaIA.avaliacao_ia.resultado,fontSize:11,color:'#52525B',margin:[0,0,0,16]});
+  }
+
+  content.push(...pdfRodape(cor));
+  const pgSize=cfgPDF.pagina||'A4';
+  const margens=[cfgPDF.margem_h||40,cfgPDF.margem_v||40,cfgPDF.margem_h||40,cfgPDF.margem_v||60];
+  pdfMake.createPdf({pageSize:pgSize,pageMargins:margens,content,styles:pdfStyles(cor),defaultStyle:{font:'Roboto'}})
+    .download('Alta_'+p.nome.replace(/\s+/g,'_')+'.pdf');
+}
+
+// ── TIMEOUT DE PIN (30min de inatividade) ──
+let _pinTs=0;
+function _resetPinTimer(){_pinTs=Date.now();}
+['click','keydown','touchstart','scroll'].forEach(ev=>document.addEventListener(ev,_resetPinTimer,{passive:true,capture:true}));
+setInterval(()=>{
+  if(!S.profAtual?.pin_hash)return;
+  if(Date.now()-_pinTs>30*60*1000&&_pinTs>0){
+    // Revogar acesso sensível
+    S.profAtual={...S.profAtual,acesso_sensivel:false};
+    sessionStorage.setItem('profAtual',JSON.stringify(S.profAtual));
+    toast('Sessão do PIN expirou — dados restritos bloqueados');
+  }
+},60*1000);
+
 function restoreSessaoForm(){
   try{
     const raw=sessionStorage.getItem('sessao_draft');
@@ -784,9 +928,13 @@ async function saveSessao(dados){
   for(let i=0;i<S.fotos.length;i++){
     const blob=await compImg(S.fotos[i]);const path=`sessoes/${sessao.id}/${Date.now()}_${i}.jpg`;
     const{error:upErr}=await sb.storage.from('fisiovida').upload(path,blob,{contentType:'image/jpeg'});
-    if(!upErr){const{data:ud}=sb.storage.from('fisiovida').getPublicUrl(path);await q(()=>sb.from('fotos_sessao').insert({sessao_id:sessao.id,url:ud.publicUrl,ordem:i}));}
+    if(!upErr){
+      const{data:ud}=sb.storage.from('fisiovida').getPublicUrl(path);
+      const regiao=S.fotosRegioes?.[i]||null;
+      await q(()=>sb.from('fotos_sessao').insert({sessao_id:sessao.id,url:ud.publicUrl,ordem:i,referencia_escala:regiao}));
+    }
   }
-  toast(`Sessão ${n} registrada`,'ok');S.fotos=[];return sessao;
+  toast(`Sessão ${n} registrada`,'ok');S.fotos=[];S.fotosRegioes=[];return sessao;
 }
 
 // ── AGENDA ──
@@ -884,6 +1032,35 @@ function pdfRodape(cor){
   return[{canvas:[{type:'line',x1:0,y1:0,x2:515,y2:0,lineWidth:1,lineColor:'#E4DDD4'}],margin:[0,24,0,14]},{columns:[{text:S.config.pdf_rodape||'',fontSize:10,color:'#A1A1AA',width:'*'},{stack:[{canvas:[{type:'line',x1:40,y1:0,x2:160,y2:0,lineWidth:1,lineColor:'#D4CDC4'}]},{text:S.config.nome_profissional||'Profissional',fontSize:11,bold:true,color:'#18181B',alignment:'center',margin:[0,6,0,0]},{text:S.config.crefito||'',fontSize:10,color:'#52525B',alignment:'center'}],width:200}]}];
 }
 
+
+// ── FOTO PARA BASE64 (para PDF) ──
+async function fotoParaBase64(url){
+  try{
+    const r=await fetch(url);
+    const blob=await r.blob();
+    return new Promise(res=>{
+      const reader=new FileReader();
+      reader.onload=()=>res(reader.result);
+      reader.readAsDataURL(blob);
+    });
+  }catch{return null;}
+}
+
+async function fotosParaPDF(sessoes,cfgPDF){
+  if(cfgPDF?.incluir_fotos===false) return {};
+  const mapa={};
+  for(const s of sessoes){
+    const fotos=s.fotos_sessao||[];
+    if(!fotos.length)continue;
+    mapa[s.id]=[];
+    for(const f of fotos.slice(0,4)){// máx 4 por sessão
+      const b64=await fotoParaBase64(f.url);
+      if(b64)mapa[s.id].push({b64,regiao:f.referencia_escala||''});
+    }
+  }
+  return mapa;
+}
+
 // ── GRÁFICO PARA PDF (Canvas → PNG base64) ──
 function graficoParaPDF(dados){
   if(!dados?.sessoes?.length) return null;
@@ -965,12 +1142,16 @@ function graficoParaPDF(dados){
   return c.toDataURL('image/png');
 }
 
-function gerarRelatorioPaciente(){
+async function gerarRelatorioPaciente(){
   const p=S.pac;if(!p){toast('Nenhum paciente','err');return;}
   const a=p.anamnese?.[0]||{},pk=p.pacotes?.find(pk=>pk.status==='ativo');
   const sessoes=(pk?.sessoes||[]).sort((x,y)=>new Date(x.data_sessao)-new Date(y.data_sessao));
   const fase=calcFase(a.data_cirurgia),cor=corPDF();
   const feitas=sessoes.length,total=pk?.total_sessoes||0,pct=total>0?Math.round((feitas/total)*100):0;
+  const cfgPDF=S.config.pdf_opts||{};
+  // Pré-carregar fotos
+  toast('Preparando PDF…');
+  const fotosMap=await fotosParaPDF(sessoes,cfgPDF);
   const content=[...pdfHeader('Relatório de Acompanhamento',cor)];
   content.push({text:p.nome,fontSize:22,bold:true,color:'#18181B',margin:[0,0,0,4]});
   content.push({columns:[a.tipo_cirurgia?{text:`✂ ${a.tipo_cirurgia}`,fontSize:11,color:'#52525B'}:{text:''},a.data_cirurgia?{text:`Cirurgia: ${fmtD(a.data_cirurgia)}`,fontSize:11,color:'#52525B'}:{text:''},fase?{text:`${fase.nome} · D${fase.dias}`,fontSize:11,bold:true,color:cor}:{text:''}],margin:[0,0,0,16]});
@@ -983,12 +1164,16 @@ function gerarRelatorioPaciente(){
       const rows=[[{text:`Sessão ${s.numero_sessao}`,bold:true,color:'#fff',fontSize:12,fillColor:cor,margin:[8,6,8,6]},{text:`${fmtD(s.data_sessao)}  ·  ${fLabel[s.fase_cicatrizacao]||''}`,fontSize:11,color:'#52525B',margin:[8,6,8,6],fillColor:'#F8F6F2'}]];
       if(procs.length)rows.push([{text:'Procedimentos:',fontSize:10,bold:true,color:'#A1A1AA',margin:[8,4,8,2]},{text:procs.join('  ·  '),fontSize:11,margin:[8,4,8,4]}]);
       if(s.notas)rows.push([{text:'Evolução:',fontSize:10,bold:true,color:'#A1A1AA',margin:[8,4,8,2]},{text:s.notas,fontSize:11,margin:[8,4,8,8]}]);
-      if(s.avaliacao_ia?.resultado)rows.push([{text:'Avaliação IA:',fontSize:10,bold:true,color:'#A1A1AA',margin:[8,4,8,2]},{text:s.avaliacao_ia.resultado,fontSize:11,margin:[8,4,8,8]}]);
-      content.push({table:{widths:['auto','*'],body:rows},layout:{hLineWidth:(i)=>i===0?0:.5,vLineWidth:()=>0,hLineColor:()=>'#E4DDD4'},margin:[0,0,0,12]});
+      if(cfgPDF.incluir_ia!==false&&s.avaliacao_ia?.resultado)rows.push([{text:'Avaliação IA:',fontSize:10,bold:true,color:'#A1A1AA',margin:[8,4,8,2]},{text:s.avaliacao_ia.resultado,fontSize:11,margin:[8,4,8,8]}]);
+      content.push({table:{widths:['auto','*'],body:rows},layout:{hLineWidth:(i)=>i===0?0:.5,vLineWidth:()=>0,hLineColor:()=>'#E4DDD4'},margin:[0,0,0,cfgPDF.incluir_fotos!==false&&fotosMap[s.id]?.length?4:12]});
+      // Fotos da sessão
+      if(cfgPDF.incluir_fotos!==false&&fotosMap[s.id]?.length){
+        const fotoCols=fotosMap[s.id].map(f=>({stack:[{image:f.b64,width:110,height:110,fit:[110,110]},{text:f.regiao,fontSize:8,color:'#A1A1AA',alignment:'center',margin:[0,2,0,0]}]}));
+        content.push({columns:fotoCols,columnGap:8,margin:[0,0,0,14]});
+      }
     });
   }
   // Gráfico de evolução (se disponível e configurado)
-  const cfgPDF=S.config.pdf_opts||{};
   if(cfgPDF.incluir_grafico!==false && S.evolucaoIA){
     const imgGraf=graficoParaPDF(S.evolucaoIA);
     if(imgGraf){
@@ -1337,6 +1522,8 @@ function rPac(){
         <div class="pdf-btns">
           <button class="btn btn-s btn-sm" onclick="gerarRelatorioPaciente()">📄 Relatório</button>
           <button class="btn btn-s btn-sm" onclick="gerarProntuario()">📋 Prontuário</button>
+          ${(pk?.sessoes?.length>=pk?.total_sessoes&&pk?.total_sessoes>0)?`<button class="btn btn-acc btn-sm" onclick="gerarRelatorioAlta()">🎓 Alta</button>`:''}
+          ${(pk?.sessoes||[]).filter(s=>s.fotos_sessao?.length).length>=2?`<button class="btn btn-s btn-sm" onclick="modalSliderAntesDepois()">👁 Antes/Depois</button>`:''}
         </div>
       </div>
     </div>
@@ -1667,6 +1854,59 @@ function verEvento(id){
 async function updEvSt(id,status){await updateStatus(id,status);render();}
 async function delEv(id){if(!confirm('Excluir este evento?'))return;await deleteEvento(id);render();}
 
+
+// ── CONFIRMAÇÃO MODAL ──
+function confirmar(msg, onConfirm, danger=true){
+  modal(`<div class="mo-box" style="max-width:380px;text-align:center">
+    <div style="font-size:36px;margin-bottom:16px">${danger?'⚠️':'❓'}</div>
+    <div style="font-size:16px;font-weight:600;color:var(--txt);margin-bottom:8px">${msg}</div>
+    <div class="flex gap8 mt24" style="justify-content:center">
+      <button class="btn btn-s" onclick="closeMo()">Cancelar</button>
+      <button class="btn" style="background:${danger?'#DC2626':'var(--primary)'};color:#fff" id="cbtn">Confirmar</button>
+    </div>
+  </div>`);
+  document.getElementById('cbtn')?.addEventListener('click',()=>{closeMo();onConfirm();});
+}
+
+
+// ── EDITAR SESSÃO ──
+async function editarSessao(id){
+  const pk=S.pac?.pacotes?.find(p=>p.status==='ativo');
+  const s=pk?.sessoes?.find(s=>s.id===id);if(!s)return;
+  const procs=Array.isArray(s.procedimentos)?s.procedimentos:JSON.parse(s.procedimentos||'[]');
+  modal(`<div class="mo-box" style="max-width:560px">
+    <div class="mo-hd"><div class="mo-t">Editar Sessão ${s.numero_sessao}</div><button class="mo-cls" onclick="closeMo()">✕</button></div>
+    <div class="fg"><label class="fl">Data</label><input class="fi" type="date" id="es-data" value="${s.data_sessao}" style="max-width:200px"></div>
+    <div class="fg"><label class="fl">Procedimentos</label>
+      <div class="proc-grid">
+        ${PROCS.map(p=>`<label class="proc-check"><input type="checkbox" value="${p}" ${procs.includes(p)?'checked':''}><div class="proc-chk-dot"><svg width="10" height="8" viewBox="0 0 10 8" fill="none"><path d="M1 4L3.5 6.5L9 1" stroke="white" stroke-width="1.8" stroke-linecap="round"/></svg></div>${p}</label>`).join('')}
+      </div>
+    </div>
+    <div class="fg"><label class="fl">Notas</label><textarea class="fta" id="es-notas" style="min-height:100px">${s.notas||''}</textarea></div>
+    <div class="flex gap8 mt8">
+      <button class="btn btn-p" id="es-salvar" style="flex:1;justify-content:center">Salvar</button>
+      <button class="btn btn-s" onclick="closeMo()">Cancelar</button>
+    </div>
+  </div>`);
+  document.getElementById('es-salvar')?.addEventListener('click',async()=>{
+    const procs2=Array.from(document.querySelectorAll('.proc-check input:checked')).map(e=>e.value);
+    try{
+      await q(()=>sb.from('sessoes').update({data_sessao:document.getElementById('es-data').value,procedimentos:procs2,notas:document.getElementById('es-notas').value.trim()}).eq('id',id));
+      toast('Sessão atualizada','ok');closeMo();await loadPac(S.pac.id);setTab('timeline');
+    }catch(e){toast('Erro: '+e.message,'err');}
+  });
+}
+
+async function excluirSessao(id){
+  confirmar('Excluir esta sessão permanentemente?',async()=>{
+    try{
+      await q(()=>sb.from('fotos_sessao').delete().eq('sessao_id',id));
+      await q(()=>sb.from('sessoes').delete().eq('id',id));
+      toast('Sessão excluída','ok');await loadPac(S.pac.id);setTab('timeline');
+    }catch(e){toast('Erro: '+e.message,'err');}
+  });
+}
+
 function verSessao(id){
   const pk=S.pac?.pacotes?.find(p=>p.status==='ativo');const s=pk?.sessoes?.find(s=>s.id===id);if(!s)return;
   const procs=Array.isArray(s.procedimentos)?s.procedimentos:JSON.parse(s.procedimentos||'[]');const fotos=s.fotos_sessao||[];
@@ -1678,7 +1918,11 @@ function verSessao(id){
     ${procs.length?`<div class="sec-t" style="margin-bottom:10px">Procedimentos</div><div class="tl-procs" style="margin-bottom:18px">${procs.map(p=>`<span class="proc-tag">${p}</span>`).join('')}</div>`:''}
     ${s.notas&&sensivelOk?`<div class="sec-t" style="margin-bottom:8px">Evolução</div><div style="font-size:14px;color:var(--txt2);line-height:1.65;white-space:pre-wrap;margin-bottom:18px">${s.notas}</div>`:''}
     ${s.avaliacao_ia?.resultado?(sensivelOk?`<div class="sec-t" style="margin-bottom:8px">✦ Avaliação de Cicatrização (IA)</div><div style="background:var(--primary-lt);border-radius:var(--r-sm);padding:14px;font-size:13px;line-height:1.65;color:var(--primary-dk);white-space:pre-wrap;margin-bottom:18px">${s.avaliacao_ia.resultado}</div>`:bloqueio):''}
-    ${fotos.length?(sensivelOk?`<div class="sec-t" style="margin-bottom:10px">📸 Fotos</div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px">${fotos.map(f=>`<img src="${f.url}" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;border:1.5px solid var(--border)">`).join('')}</div>`:bloqueio):''}
+    ${fotos.length?(sensivelOk?`<div class="sec-t" style="margin-bottom:10px">📸 Fotos</div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px">${fotos.map(f=>`<img src="${f.url}" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;border:1.5px solid var(--border)" title="${f.referencia_escala||''}">`).join('')}</div>`:bloqueio):''}
+    <div class="flex gap8 mt16">
+      <button class="btn btn-s btn-sm" onclick="closeMo();editarSessao('${s.id}')">✏ Editar</button>
+      <button class="btn btn-sm" style="background:#FEF2F2;color:#DC2626;border:1px solid #FECACA;margin-left:auto" onclick="closeMo();excluirSessao('${s.id}')">🗑 Excluir</button>
+    </div>
   </div>`);
 }
 
@@ -1720,14 +1964,18 @@ function bindSessEvts(){
   document.getElementById('baia')?.addEventListener('click',async()=>{
     if(!S.fotos.length)return;const btn=document.getElementById('baia'),div=document.getElementById('aired');
     btn.disabled=true;btn.textContent='Analisando…';div.style.display='block';div.innerHTML='<div class="ai-loading"><div class="ai-spin"></div> Analisando cicatrização…</div>';
-    try{const r=await avaliarIA(document.getElementById('snotas')?.value?.trim());S.iaResult=r;div.innerHTML=`<div class="ai-result">${r}</div>`;}catch(e){div.innerHTML=`<div class="ai-result" style="color:rgba(255,120,120,.9)">Erro: ${e.message}</div>`;}
+    try{
+      const r=await avaliarIA(document.getElementById('snotas')?.value?.trim());
+      S.iaResult=r; // {resultado, scores}
+      div.innerHTML=`<div class="ai-result">${r.resultado||r}</div>`;
+    }catch(e){div.innerHTML=`<div class="ai-result" style="color:rgba(255,120,120,.9)">Erro: ${e.message}</div>`;}
     btn.disabled=false;btn.textContent='Analisar Cicatrização';
   });
   document.getElementById('bss')?.addEventListener('click',async()=>{
     const data=document.getElementById('sdata')?.value;if(!data){toast('Informe a data','err');return;}
     const procs=Array.from(document.querySelectorAll('.proc-check input:checked')).map(e=>e.value);
     const notas=document.getElementById('snotas')?.value?.trim()||'';
-    const ia=S.iaResult?{resultado:S.iaResult}:null;
+    const ia=S.iaResult?{resultado:S.iaResult.resultado||S.iaResult,scores:S.iaResult.scores||null}:null;
     const btn=document.getElementById('bss');btn.textContent='Salvando…';btn.disabled=true;
     try{
       await saveSessao({data_sessao:data,procedimentos:procs,notas,avaliacao_ia:ia});
@@ -1821,7 +2069,17 @@ function modalEditProf(id){
   });
 }
 
-function rFotPrev(){const el=document.getElementById('fprev');if(!el)return;el.innerHTML=S.fotos.map((f,i)=>`<div class="ph-prev"><img src="${URL.createObjectURL(f)}"><button class="ph-rm" onclick="rmFoto(${i})">✕</button></div>`).join('');}
+function rFotPrev(){
+  const el=document.getElementById('fprev');if(!el)return;
+  el.innerHTML=S.fotos.map((f,i)=>`
+    <div class="ph-prev" style="position:relative">
+      <img src="${URL.createObjectURL(f)}">
+      <button class="ph-rm" onclick="rmFoto(${i})">✕</button>
+      <input type="text" placeholder="Região (ex: abdômen)" value="${S.fotosRegioes?.[i]||''}"
+        style="position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,.6);color:#fff;border:none;padding:3px 6px;font-size:10px;border-radius:0 0 var(--r-sm) var(--r-sm);font-family:'DM Sans',sans-serif"
+        oninput="if(!S.fotosRegioes)S.fotosRegioes=[];S.fotosRegioes[${i}]=this.value">
+    </div>`).join('');
+}
 function rmFoto(i){S.fotos.splice(i,1);rFotPrev();updIA();}
 function updIA(){const b=document.getElementById('baia');if(b)b.disabled=!S.fotos.length;}
 
