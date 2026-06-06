@@ -564,16 +564,25 @@ function temAcessoSensivel(){
 
 // ── TELA SELEÇÃO PROFISSIONAL ──
 function rSelecionarProfissional(){
-  const profs=S.profissionais;
+  // Dono da conta (baseado nas configs — sempre aparece como primeiro card)
+  const dono={
+    id:'__owner__',
+    nome:S.config.nome_profissional||S.user?.email||'Administrador',
+    crefito:S.config.crefito||'',
+    nivel:'admin',
+    pin_hash:null,
+    acesso_sensivel:true
+  };
+  const todos=[dono,...S.profissionais];
   return`<div class="prof-sel">
-    <div style="width:100%;max-width:480px">
+    <div style="width:100%;max-width:520px">
       <div style="text-align:center;margin-bottom:28px">
         ${S.config.pdf_logo?`<img src="${S.config.pdf_logo}" style="height:60px;margin-bottom:12px">`:''}
         <h1 style="font-family:'DM Serif Display',serif;font-size:28px;color:var(--primary-dk)">Quem está atendendo?</h1>
         <p style="font-size:13px;color:var(--txt3);margin-top:6px">Selecione seu perfil para continuar</p>
       </div>
       <div class="prof-grid">
-        ${profs.map(p=>`
+        ${todos.map(p=>`
           <div class="prof-card" onclick="selecionarProf('${p.id}')">
             <div class="prof-card-av">${ini(p.nome)}</div>
             <div class="prof-card-nm">${p.nome.split(' ')[0]}</div>
