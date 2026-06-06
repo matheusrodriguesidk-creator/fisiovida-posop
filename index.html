@@ -557,9 +557,22 @@ function modalPIN(prof,onSuccess){
 
 // ── VERIFICAR ACESSO SENSÍVEL ──
 function temAcessoSensivel(){
-  if(!S.profissionais.length)return true; // sem profissionais = conta simples
+  if(!S.profissionais.length)return true;  // conta individual sem profissionais
   if(!S.profAtual)return false;
-  return S.profAtual.acesso_sensivel!==false;
+  if(S.profAtual.id==='__owner__')return true; // dono sempre tem acesso
+  if(S.profAtual.nivel==='admin')return true;
+  // Se tem acesso liberado (sem restrição)
+  if(S.profAtual.acesso_sensivel===true)return true;
+  // Se tem PIN e foi verificado nesta sessão
+  if(S.profAtual.pin_hash&&S.profAtual._pinVerificado===true)return true;
+  return false;
+}
+
+function nivelRestrito(){
+  if(!S.profAtual)return false;
+  if(S.profAtual.id==='__owner__')return false;
+  if(S.profAtual.nivel==='admin')return false;
+  return S.profAtual.acesso_sensivel===false;
 }
 
 // ── TELA SELEÇÃO PROFISSIONAL ──
@@ -584,10 +597,13 @@ function rSelecionarProfissional(){
       <div class="prof-grid">
         ${todos.map(p=>`
           <div class="prof-card" onclick="selecionarProf('${p.id}')">
-            <div class="prof-card-av">${ini(p.nome)}</div>
+            <div class="prof-card-av" style="${p.nivel==='admin'||p.id==='__owner__'?'background:var(--grad-btn)':'background:var(--primary)'}">${ini(p.nome)}</div>
             <div class="prof-card-nm">${p.nome.split(' ')[0]}</div>
             <div class="prof-card-role">${p.crefito||nivelLabel(p.nivel)}</div>
-            ${p.pin_hash?`<div style="font-size:10px;color:var(--txt3);margin-top:4px">🔒 PIN</div>`:''}
+            <div style="margin-top:6px;display:flex;gap:4px;justify-content:center;flex-wrap:wrap">
+              ${p.pin_hash?`<span style="font-size:10px;background:var(--primary-lt);color:var(--primary-dk);padding:2px 7px;border-radius:20px">🔒 PIN</span>`:''}
+              ${p.acesso_sensivel===false?`<span style="font-size:10px;background:#FEF2F2;color:#DC2626;padding:2px 7px;border-radius:20px">🚫 Restrito</span>`:''}
+            </div>
           </div>`).join('')}
       </div>
       <div style="text-align:center;margin-top:20px">
@@ -764,10 +780,16 @@ function modalMensagens(eventoId){
 }
 
 
-function pedirAcessoSensivel(){
+function pedirAcessoSensivel(onSuccess){
   const prof=S.profAtual;
-  if(!prof||!prof.pin_hash){toast('Sem PIN configurado para este perfil','err');return;}
-  modalPIN(prof,()=>{toast('Acesso liberado','ok');});
+  if(!prof){return;}
+  if(!prof.pin_hash){
+    toast('Configure um PIN para este perfil em Configurações','err');return;
+  }
+  modalPIN(prof,()=>{
+    toast('Acesso sensível liberado','ok');
+    if(typeof onSuccess==='function') onSuccess();
+  });
 }
 
 function copiarMsg(i){
@@ -923,9 +945,9 @@ setInterval(()=>{
   if(!S.profAtual?.pin_hash)return;
   if(Date.now()-_pinTs>30*60*1000&&_pinTs>0){
     // Revogar acesso sensível
-    S.profAtual={...S.profAtual,acesso_sensivel:false};
+    S.profAtual={...S.profAtual,_pinVerificado:false};
     sessionStorage.setItem('profAtual',JSON.stringify(S.profAtual));
-    toast('Sessão do PIN expirou — dados restritos bloqueados');
+    toast('PIN expirou — dados sensíveis bloqueados');
   }
 },60*1000);
 
@@ -1457,7 +1479,11 @@ function rSidebar(){
     <div class="sb-foot">
       <div class="u-card">
         <div class="u-av">${ini(nome)}</div>
-        <div><div class="u-name">${nome.split(' ')[0]}</div><div class="u-role">${S.config.crefito||'Fisioterapeuta'}</div></div>
+        <div>
+        <div class="u-name">${S.profAtual?S.profAtual.nome.split(' ')[0]:nome.split(' ')[0]}</div>
+        <div class="u-role">${S.profAtual?(S.profAtual.crefito||nivelLabel(S.profAtual.nivel)):(S.config.crefito||'Fisioterapeuta')}</div>
+        ${nivelRestrito()&&!temAcessoSensivel()?'<div style="font-size:9px;color:#f59e0b;margin-top:1px">🔒 Modo restrito</div>':''}
+      </div>
       </div>
       <button class="nav-btn-cfg ${cfgAtivo?'cfg-active':''}" onclick="nav('configuracoes')">⚙ Configurações</button>
       <button class="btn-sair" onclick="sair()">↩ Sair</button>
@@ -2092,7 +2118,10 @@ function verSessao(id){
   const procs=Array.isArray(s.procedimentos)?s.procedimentos:JSON.parse(s.procedimentos||'[]');const fotos=s.fotos_sessao||[];
   const fLabel={'fase-1':'🔴 Inflamatória','fase-2':'🟡 Proliferativa','fase-3':'🟢 Remodelamento'};const fCls={'fase-1':'f1','fase-2':'f2','fase-3':'f3'};const fc=s.fase_cicatrizacao||'fase-3';
   const sensivelOk=temAcessoSensivel();
-  const bloqueio=`<div class="sensivel-lock" onclick="closeMo();pedirAcessoSensivel()">🔒 Dados restritos — clique para desbloquear</div>`;
+  const haPin=S.profAtual?.pin_hash;
+  const bloqueio=`<div class="sensivel-lock" onclick="${haPin?`closeMo();pedirAcessoSensivel(()=>verSessao('${s.id}'))`:'void(0)'}">
+    🔒 ${haPin?'Dados restritos — clique para inserir PIN':'Acesso restrito para este perfil'}
+  </div>`;
   modal(`<div class="mo-box" style="max-width:640px"><div class="mo-hd"><div class="mo-t">Sessão ${s.numero_sessao}</div><button class="mo-cls" onclick="closeMo()">✕</button></div>
     <div class="flex gap8 ai-c" style="margin-bottom:18px"><span class="badge b-${fCls[fc]}">${fLabel[fc]||fc}</span><span style="font-size:13px;color:var(--txt3)">${fmtD(s.data_sessao)}</span></div>
     ${procs.length?`<div class="sec-t" style="margin-bottom:10px">Procedimentos</div><div class="tl-procs" style="margin-bottom:18px">${procs.map(p=>`<span class="proc-tag">${p}</span>`).join('')}</div>`:''}
