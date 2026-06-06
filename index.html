@@ -393,6 +393,8 @@ const S={
   view:'loading',tab:'timeline',fotos:[],iaResult:null,editAnam:false,
   agenda:[],calAno:new Date().getFullYear(),calMes:new Date().getMonth(),calDiaSel:null,
   agView:'hoje',semanaOffset:0,
+  profissionais:[],profAtual:null,  // profissional logado nesta sessão
+  evolucaoIA:null,loadingEvolucao:false,
 };
 
 const sb=window.supabase.createClient(SUPA_URL,SUPA_KEY);
@@ -441,6 +443,264 @@ async function img64(file,maxW=800){
 }
 
 // ── AUTH ──
+
+// ── PROFISSIONAIS ──
+async function loadProfissionais(){
+  S.profissionais=await q(()=>sb.from('profissionais').select('*').eq('user_id',S.user.id).eq('ativo',true).order('created_at'))||[];
+}
+async function saveProfissional(dados){
+  if(dados.id){await q(()=>sb.from('profissionais').update(dados).eq('id',dados.id));toast('Profissional atualizado','ok');}
+  else{await q(()=>sb.from('profissionais').insert({...dados,user_id:S.user.id}));toast('Profissional adicionado','ok');}
+  await loadProfissionais();
+}
+async function deleteProfissional(id){
+  await q(()=>sb.from('profissionais').update({ativo:false}).eq('id',id));
+  toast('Removido','ok');await loadProfissionais();
+}
+
+// ── PIN HASH (SHA-256 browser) ──
+async function hashPIN(pin){
+  const buf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(pin+'fisiovida_salt'));
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+
+// ── MODAL PIN ──
+function modalPIN(prof,onSuccess){
+  let digits='';
+  const o=modal(`<div class="mo-box" style="max-width:360px;text-align:center">
+    <div class="mo-hd" style="justify-content:center"><div class="mo-t">PIN — ${prof.nome.split(' ')[0]}</div></div>
+    <p style="font-size:13px;color:var(--txt3);margin-bottom:16px">Digite o PIN de 4 dígitos</p>
+    <div class="pin-dots">${[0,1,2,3].map(i=>`<div class="pin-dot" id="pd${i}"></div>`).join('')}</div>
+    <div class="pin-error" id="pin-err"></div>
+    <div class="pin-pad" style="margin-top:12px">
+      ${[1,2,3,4,5,6,7,8,9,'',0,'⌫'].map(k=>`<button class="pin-btn" data-k="${k}" ${k===''?'style="visibility:hidden"':''}>${k}</button>`).join('')}
+    </div>
+    <button class="btn btn-g btn-sm" style="margin-top:16px" onclick="closeMo()">Cancelar</button>
+  </div>`);
+  const update=()=>{[0,1,2,3].forEach(i=>{const el=document.getElementById('pd'+i);if(el)el.classList.toggle('filled',i<digits.length);});};
+  document.querySelectorAll('.pin-btn').forEach(btn=>{
+    btn.addEventListener('click',async()=>{
+      const k=btn.dataset.k;
+      if(k==='⌫'){digits=digits.slice(0,-1);}
+      else if(k!==''&&digits.length<4){digits+=k;}
+      update();
+      if(digits.length===4){
+        const h=await hashPIN(digits);
+        if(h===prof.pin_hash){
+          S.profAtual=prof;
+          sessionStorage.setItem('profAtual',JSON.stringify(prof));
+          closeMo();onSuccess();
+        } else {
+          document.getElementById('pin-err').textContent='PIN incorreto';
+          digits='';update();
+        }
+      }
+    });
+  });
+}
+
+// ── VERIFICAR ACESSO SENSÍVEL ──
+function temAcessoSensivel(){
+  if(!S.profissionais.length)return true; // sem profissionais = conta simples
+  if(!S.profAtual)return false;
+  return S.profAtual.acesso_sensivel!==false;
+}
+
+// ── TELA SELEÇÃO PROFISSIONAL ──
+function rSelecionarProfissional(){
+  const profs=S.profissionais;
+  return`<div class="prof-sel">
+    <div style="width:100%;max-width:480px">
+      <div style="text-align:center;margin-bottom:28px">
+        ${S.config.pdf_logo?`<img src="${S.config.pdf_logo}" style="height:60px;margin-bottom:12px">`:''}
+        <h1 style="font-family:'DM Serif Display',serif;font-size:28px;color:var(--primary-dk)">Quem está atendendo?</h1>
+        <p style="font-size:13px;color:var(--txt3);margin-top:6px">Selecione seu perfil para continuar</p>
+      </div>
+      <div class="prof-grid">
+        ${profs.map(p=>`
+          <div class="prof-card" onclick="selecionarProf('${p.id}')">
+            <div class="prof-card-av">${ini(p.nome)}</div>
+            <div class="prof-card-nm">${p.nome.split(' ')[0]}</div>
+            <div class="prof-card-role">${p.crefito||nivelLabel(p.nivel)}</div>
+            ${p.pin_hash?`<div style="font-size:10px;color:var(--txt3);margin-top:4px">🔒 PIN</div>`:''}
+          </div>`).join('')}
+      </div>
+      <div style="text-align:center;margin-top:20px">
+        <button class="btn btn-g btn-sm" onclick="sair()">↩ Sair da conta</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function nivelLabel(n){return{admin:'Administrador',profissional:'Fisioterapeuta',auxiliar:'Auxiliar'}[n]||n;}
+
+async function selecionarProf(id){
+  const prof=S.profissionais.find(p=>p.id===id);if(!prof)return;
+  if(prof.pin_hash){
+    modalPIN(prof,()=>{
+      sessionStorage.setItem('profAtual',JSON.stringify(S.profAtual));
+      restoreView();
+    });
+  } else {
+    S.profAtual=prof;
+    sessionStorage.setItem('profAtual',JSON.stringify(prof));
+    restoreView();
+  }
+}
+
+function restoreView(){
+  const hash=window.location.hash.slice(1)||'dashboard';
+  const parts=hash.split('/');const view=parts[0];
+  if(view==='paciente'&&parts[1]){loadPac(parts[1]).then(()=>{S.tab=parts[2]||'timeline';nav('paciente');});}
+  else if(view==='agenda'){S.agView=parts[1]||'hoje';nav('agenda');}
+  else if(view==='configuracoes'){nav('configuracoes');}
+  else nav('dashboard');
+}
+
+// ── GRÁFICO EVOLUÇÃO IA ──
+async function gerarEvolucaoIA(){
+  const pk=S.pac?.pacotes?.find(p=>p.status==='ativo');
+  const sessoes=(pk?.sessoes||[]).filter(s=>s.avaliacao_ia?.resultado).sort((a,b)=>new Date(a.data_sessao)-new Date(b.data_sessao));
+  if(sessoes.length<2){toast('Necessário pelo menos 2 sessões com avaliação IA','err');return;}
+  S.loadingEvolucao=true;S.evolucaoIA=null;setTab('timeline');
+  const{data:{session}}=await sb.auth.getSession();if(!session)return;
+  const historico=sessoes.map(s=>`Sessão ${s.numero_sessao} (${fmtD(s.data_sessao)}):
+${s.avaliacao_ia.resultado}`).join('
+
+---
+
+');
+  const prompt=`Analise a evolução desta paciente de fisioterapia pós-operatória com base nas avaliações abaixo.
+Retorne APENAS um JSON válido (sem markdown, sem texto extra) neste formato exato:
+{"sessoes":[{"n":1,"edema":3,"fibrose":4,"cicatriz":2},...],"resumo":"texto de até 80 palavras sobre a evolução geral"}
+Escala: 1=muito ruim, 5=excelente. Inclua apenas sessões que têm avaliação.
+Avaliações:
+${historico}`;
+  try{
+    const r=await fetch(`${SUPA_URL}/functions/v1/ia-proxy`,{method:'POST',headers:{'Content-Type':'application/json','Authorization':`Bearer ${session.access_token}`},body:JSON.stringify({model:AI_MODEL,max_tokens:512,messages:[{role:'user',content:prompt}]})});
+    const d=await r.json();if(!r.ok)throw new Error(d.error);
+    const txt=d.content?.[0]?.text||'';
+    const json=JSON.parse(txt.replace(/```json?|```/g,'').trim());
+    S.evolucaoIA=json;
+  }catch(e){toast('Erro ao gerar gráfico: '+e.message,'err');}
+  S.loadingEvolucao=false;setTab('timeline');
+}
+
+function rGraficoEvolucao(){
+  if(S.loadingEvolucao)return`<div class="evolucao-box"><div class="ai-loading" style="justify-content:center;padding:20px;color:var(--txt2)"><div class="ai-spin" style="border-color:rgba(79,160,212,.3);border-top-color:var(--primary)"></div> Analisando evolução…</div></div>`;
+  if(!S.evolucaoIA)return'';
+  const{sessoes,resumo}=S.evolucaoIA;
+  if(!sessoes?.length)return'';
+  const W=460,H=180,PAD={t:20,r:16,b:32,l:32};
+  const iW=W-PAD.l-PAD.r,iH=H-PAD.t-PAD.b;
+  const n=sessoes.length;
+  const xS=(i)=>PAD.l+i*(iW/(Math.max(n-1,1)));
+  const yS=(v)=>PAD.t+iH-((v-1)/(4))*iH;
+  const line=(key,color)=>{
+    const pts=sessoes.map((s,i)=>`${xS(i)},${yS(s[key]||1)}`).join(' ');
+    const area=`M ${xS(0)},${yS(sessoes[0][key]||1)} `+sessoes.slice(1).map((s,i)=>`L ${xS(i+1)},${yS(s[key]||1)}`).join(' ')+` L ${xS(n-1)},${PAD.t+iH} L ${xS(0)},${PAD.t+iH} Z`;
+    return`<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="${area}" fill="${color}" fill-opacity="0.08"/>
+    ${sessoes.map((s,i)=>`<circle cx="${xS(i)}" cy="${yS(s[key]||1)}" r="3.5" fill="${color}" stroke="white" stroke-width="1.5"/>`).join('')}`;
+  };
+  const gridLines=[1,2,3,4,5].map(v=>`<line x1="${PAD.l}" y1="${yS(v)}" x2="${W-PAD.r}" y2="${yS(v)}" stroke="#E2DDE6" stroke-width="1" stroke-dasharray="3,3"/><text x="${PAD.l-6}" y="${yS(v)+4}" font-size="9" fill="#9AA5B4" text-anchor="end">${v}</text>`).join('');
+  const xLabels=sessoes.map((s,i)=>`<text x="${xS(i)}" y="${H-6}" font-size="9" fill="#9AA5B4" text-anchor="middle">S${s.n}</text>`).join('');
+  const svg=`<svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:${W}px;overflow:visible">${gridLines}${xLabels}${line('edema','#4fa0d4')}${line('fibrose','#f59e0b')}${line('cicatriz','#95bb29')}</svg>`;
+  return`<div class="evolucao-box">
+    <div class="flex jb ai-c" style="margin-bottom:12px">
+      <div class="card-t">📊 Análise de Evolução</div>
+      <button class="btn btn-s btn-sm" onclick="S.evolucaoIA=null;setTab('timeline')">✕</button>
+    </div>
+    <div class="evol-legend">
+      <div class="evol-leg-item"><div class="evol-leg-dot" style="background:#4fa0d4"></div>Edema</div>
+      <div class="evol-leg-item"><div class="evol-leg-dot" style="background:#f59e0b"></div>Fibrose</div>
+      <div class="evol-leg-item"><div class="evol-leg-dot" style="background:#95bb29"></div>Cicatrização</div>
+    </div>
+    ${svg}
+    ${resumo?`<div class="evolucao-resumo">💬 ${resumo}</div>`:''}
+  </div>`;
+}
+
+// ── MENSAGEM WHATSAPP ──
+function gerarMensagens(evento){
+  const pac=S.pacientes.find(p=>p.id===evento.paciente_id);
+  const nomePac=pac?.nome?.split(' ')[0]||'';
+  const nomePro=(S.profAtual||S.profissionais[0])?.nome?.split(' ')[0]||S.config.nome_profissional?.split(' ')[0]||'';
+  const data=fmtD(evento.data),hora=fmtH(evento.hora_inicio);
+  const proximoEv=S.agenda.filter(e=>e.paciente_id===evento.paciente_id&&e.data>evento.data&&e.status==='agendado').sort((a,b)=>a.data.localeCompare(b.data))[0];
+  return[
+    {
+      tipo:'📅 Confirmação',
+      texto:`Olá, ${nomePac}! 👋
+
+Passando para confirmar sua sessão *${evento.titulo}* no dia *${data}* às *${hora}*.
+
+Lembre-se de vir com roupa confortável e evitar refeições pesadas 2h antes. ✨
+
+${nomePro?`Qualquer dúvida, estou à disposição!
+${nomePro} — Fisiovida 🌿`:''}`
+    },
+    {
+      tipo:'⏰ Lembrete',
+      texto:`${nomePac}, oi! 🌿
+
+Lembrando que sua sessão é *hoje* às *${hora}*.
+
+Te espero! 💚`
+    },
+    {
+      tipo:'💚 Pós-sessão',
+      texto:`${nomePac}, como você está se sentindo? 🌿
+
+Lembre-se das orientações:
+• Hidrate-se bastante
+• Evite esforços por 24h
+• Use a cinta conforme indicado
+${proximoEv?`
+📅 Próxima sessão: *${fmtD(proximoEv.data)}* às *${fmtH(proximoEv.hora_inicio)}*
+`:''}
+${nomePro?`${nomePro} — Fisiovida 🌿`:''}`
+    }
+  ];
+}
+
+function modalMensagens(eventoId){
+  const ev=S.agenda.find(e=>e.id===eventoId);if(!ev)return;
+  const msgs=gerarMensagens(ev);
+  const pac=S.pacientes.find(p=>p.id===ev.paciente_id);
+  const tel=pac?.telefone?.replace(/\D/g,'')||'';
+  modal(`<div class="mo-box" style="max-width:600px">
+    <div class="mo-hd"><div class="mo-t">💬 Mensagens WhatsApp</div><button class="mo-cls" onclick="closeMo()">✕</button></div>
+    ${pac?`<div style="font-size:13px;color:var(--txt2);margin-bottom:16px">Para: <strong>${pac.nome}</strong>${tel?` · ${pac.telefone}`:''}</div>`:''}
+    <div class="msg-templates">
+      ${msgs.map((m,i)=>`
+        <div class="msg-card">
+          <div class="msg-card-title">${m.tipo}</div>
+          <div class="msg-text" id="msg-txt-${i}">${m.texto}</div>
+          <div class="msg-actions">
+            <button class="btn btn-s btn-sm" onclick="copiarMsg(${i})">📋 Copiar</button>
+            ${tel?`<a href="https://wa.me/55${tel}?text=${encodeURIComponent(m.texto)}" target="_blank" class="btn btn-acc btn-sm" style="text-decoration:none">WhatsApp ↗</a>`:''}
+          </div>
+        </div>`).join('')}
+    </div>
+  </div>`);
+}
+
+
+function pedirAcessoSensivel(){
+  const prof=S.profAtual;
+  if(!prof||!prof.pin_hash){toast('Sem PIN configurado para este perfil','err');return;}
+  modalPIN(prof,()=>{toast('Acesso liberado','ok');});
+}
+
+function copiarMsg(i){
+  const el=document.getElementById('msg-txt-'+i);
+  if(!el)return;
+  navigator.clipboard.writeText(el.textContent).then(()=>toast('Copiado!','ok')).catch(()=>{
+    const ta=document.createElement('textarea');ta.value=el.textContent;document.body.appendChild(ta);ta.select();document.execCommand('copy');ta.remove();toast('Copiado!','ok');
+  });
+}
+
 function restoreSessaoForm(){
   try{
     const raw=sessionStorage.getItem('sessao_draft');
@@ -467,33 +727,18 @@ async function boot(){
   const{data:{session}}=await sb.auth.getSession();
   if(session){
     S.user=session.user;
-    await loadCfg();await loadPacs();await loadAgenda();
-    // Restaurar view do hash
-    const hash=window.location.hash.slice(1)||'dashboard';
-    const parts=hash.split('/');
-    const view=parts[0];
-    if(view==='paciente'&&parts[1]){
-      try{
-        await loadPac(parts[1]);
-        S.tab=parts[2]||'timeline';
-        nav('paciente');
-      }catch{nav('dashboard');}
-    } else if(view==='sessao'&&parts[1]){
-      try{
-        await loadPac(parts[1]);
-        restoreSessaoForm();
-        nav('sessao');
-      }catch{nav('dashboard');}
-    } else if(view==='agenda'){
-      S.agView=parts[1]||'hoje';
-      nav('agenda');
-    } else if(view==='configuracoes'){
-      nav('configuracoes');
-    } else {
-      nav('dashboard');
+    await loadCfg();await loadPacs();await loadAgenda();await loadProfissionais();
+    // Restaurar profissional da sessão
+    try{const p=sessionStorage.getItem('profAtual');if(p)S.profAtual=JSON.parse(p);}catch{}
+    // Se há profissionais e nenhum selecionado → tela de seleção
+    if(S.profissionais.length>0&&!S.profAtual){
+      const app=document.getElementById('app');
+      app.innerHTML=rSelecionarProfissional();
+      return;
     }
+    restoreView();
   } else nav('login');
-  sb.auth.onAuthStateChange((_,s)=>{if(!s&&S.view!=='login')nav('login');});
+  sb.auth.onAuthStateChange((_,s)=>{if(!s&&S.view!=='login'){sessionStorage.removeItem('profAtual');S.profAtual=null;nav('login');}});
 }
 async function login(email,pw){
   const{data,error}=await sb.auth.signInWithPassword({email,password:pw});
@@ -1001,9 +1246,12 @@ function rTimeline(){
   const pk=S.pac?.pacotes?.find(p=>p.status==='ativo');
   const all=(pk?.sessoes||[]).sort((a,b)=>new Date(a.data_sessao)-new Date(b.data_sessao));
   if(!all.length)return`<div class="tl-empty"><div style="font-size:48px;margin-bottom:14px">🌱</div><div style="font-size:16px;font-weight:600;color:var(--txt2)">Jornada ainda não iniciada</div><div style="font-size:13px;color:var(--txt3);margin-top:4px">Registre a primeira sessão para começar a linha do tempo</div><button class="btn btn-p mt16" onclick="nav('sessao')">+ Primeira Sessão</button></div>`;
+  const sessComIA=all.filter(s=>s.avaliacao_ia?.resultado);
+  const btnEvolucao=sessComIA.length>=2?`<div class="flex jb ai-c" style="margin-bottom:16px"><div></div><button class="btn btn-s btn-sm" onclick="gerarEvolucaoIA()">📊 Análise de Evolução</button></div>`:'';
+  const grafico=rGraficoEvolucao();
   const por={'fase-1':[],'fase-2':[],'fase-3':[]};all.forEach(s=>{(por[s.fase_cicatrizacao]||por['fase-3']).push(s);});
   const labels={'fase-1':{cor:'var(--f1)',nm:'🔴 Fase Inflamatória',sub:'D0 — D5'},'fase-2':{cor:'var(--f2)',nm:'🟡 Fase Proliferativa',sub:'D6 — D21'},'fase-3':{cor:'var(--f3)',nm:'🟢 Fase de Remodelamento',sub:'D22+'}};
-  let h='<div class="timeline">';
+  let h=btnEvolucao+grafico+'<div class="timeline">';
   ['fase-1','fase-2','fase-3'].forEach(f=>{
     const its=por[f];if(!its.length)return;const lb=labels[f];
     h+=`<div class="tl-phase"><div class="tl-phase-dot" style="background:${lb.cor}"></div><span style="font-size:14px;font-weight:700;color:${lb.cor}">${lb.nm}</span><span style="font-size:12px;color:var(--txt3);margin-left:6px">${lb.sub}</span></div>`;
@@ -1095,6 +1343,21 @@ function rCfg(){
       </div>
     </div>
     <button class="btn btn-p btn-lg" id="bscfg">Salvar Configurações</button>
+
+    <div class="cfg-sec" style="margin-top:24px">
+      <div class="cfg-sec-t">👥 Profissionais</div>
+      <div id="prof-list" style="margin-bottom:14px">
+        ${S.profissionais.length===0?`<div style="font-size:13px;color:var(--txt3);padding:8px 0">Nenhum profissional cadastrado — conta de uso individual</div>`:S.profissionais.map(p=>`
+          <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)">
+            <div class="u-av" style="background:var(--grad-btn);width:36px;height:36px;font-size:13px">${ini(p.nome)}</div>
+            <div style="flex:1"><div style="font-size:14px;font-weight:600">${p.nome}</div>
+              <div style="font-size:11px;color:var(--txt3)">${nivelLabel(p.nivel)}${p.pin_hash?' · 🔒 PIN':''}${p.acesso_sensivel===false?' · 🚫 Sem dados sensíveis':''}</div>
+            </div>
+            <button class="btn btn-g btn-sm" onclick="modalEditProf('${p.id}')">Editar</button>
+          </div>`).join('')}
+      </div>
+      <button class="btn btn-p btn-sm" id="bnprof">+ Adicionar Profissional</button>
+    </div>
   </div>`;
 }
 
@@ -1228,8 +1491,9 @@ function verEvento(id){
     ${e.pacientes?.nome?`<div class="dr"><span class="dr-lbl">Paciente</span><span class="dr-val">${e.pacientes.nome}</span></div>`:''}
     ${e.observacoes?`<div class="dr"><span class="dr-lbl">Observações</span><span class="dr-val">${e.observacoes}</span></div>`:''}
     <div class="dr"><span class="dr-lbl">Status</span><span class="dr-val">${statusLabel[e.status]||e.status}</span></div>
-    <div class="flex gap8 mt16">
+    <div class="flex gap8 mt16" style="flex-wrap:wrap">
       ${e.status==='agendado'?`<button class="btn btn-acc btn-sm" onclick="closeMo();updEvSt('${e.id}','realizado')">✓ Realizado</button><button class="btn btn-s btn-sm" onclick="closeMo();updEvSt('${e.id}','cancelado')">✕ Cancelar</button>`:''}
+      ${e.paciente_id?`<button class="btn btn-p btn-sm" onclick="closeMo();modalMensagens('${e.id}')">💬 Mensagem</button>`:''}
       <button class="btn btn-g btn-sm" style="margin-left:auto;color:#DC2626" onclick="closeMo();delEv('${e.id}')">🗑 Excluir</button>
     </div>
   </div>`);
@@ -1242,12 +1506,14 @@ function verSessao(id){
   const pk=S.pac?.pacotes?.find(p=>p.status==='ativo');const s=pk?.sessoes?.find(s=>s.id===id);if(!s)return;
   const procs=Array.isArray(s.procedimentos)?s.procedimentos:JSON.parse(s.procedimentos||'[]');const fotos=s.fotos_sessao||[];
   const fLabel={'fase-1':'🔴 Inflamatória','fase-2':'🟡 Proliferativa','fase-3':'🟢 Remodelamento'};const fCls={'fase-1':'f1','fase-2':'f2','fase-3':'f3'};const fc=s.fase_cicatrizacao||'fase-3';
+  const sensivelOk=temAcessoSensivel();
+  const bloqueio=`<div class="sensivel-lock" onclick="closeMo();pedirAcessoSensivel()">🔒 Dados restritos — clique para desbloquear</div>`;
   modal(`<div class="mo-box" style="max-width:640px"><div class="mo-hd"><div class="mo-t">Sessão ${s.numero_sessao}</div><button class="mo-cls" onclick="closeMo()">✕</button></div>
     <div class="flex gap8 ai-c" style="margin-bottom:18px"><span class="badge b-${fCls[fc]}">${fLabel[fc]||fc}</span><span style="font-size:13px;color:var(--txt3)">${fmtD(s.data_sessao)}</span></div>
     ${procs.length?`<div class="sec-t" style="margin-bottom:10px">Procedimentos</div><div class="tl-procs" style="margin-bottom:18px">${procs.map(p=>`<span class="proc-tag">${p}</span>`).join('')}</div>`:''}
-    ${s.notas?`<div class="sec-t" style="margin-bottom:8px">Evolução</div><div style="font-size:14px;color:var(--txt2);line-height:1.65;white-space:pre-wrap;margin-bottom:18px">${s.notas}</div>`:''}
-    ${s.avaliacao_ia?.resultado?`<div class="sec-t" style="margin-bottom:8px">✦ Avaliação de Cicatrização (IA)</div><div style="background:var(--primary-lt);border-radius:var(--r-sm);padding:14px;font-size:13px;line-height:1.65;color:var(--primary-dk);white-space:pre-wrap;margin-bottom:18px">${s.avaliacao_ia.resultado}</div>`:''}
-    ${fotos.length?`<div class="sec-t" style="margin-bottom:10px">📸 Fotos</div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px">${fotos.map(f=>`<img src="${f.url}" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;border:1.5px solid var(--border)">`).join('')}</div>`:''}
+    ${s.notas&&sensivelOk?`<div class="sec-t" style="margin-bottom:8px">Evolução</div><div style="font-size:14px;color:var(--txt2);line-height:1.65;white-space:pre-wrap;margin-bottom:18px">${s.notas}</div>`:''}
+    ${s.avaliacao_ia?.resultado?(sensivelOk?`<div class="sec-t" style="margin-bottom:8px">✦ Avaliação de Cicatrização (IA)</div><div style="background:var(--primary-lt);border-radius:var(--r-sm);padding:14px;font-size:13px;line-height:1.65;color:var(--primary-dk);white-space:pre-wrap;margin-bottom:18px">${s.avaliacao_ia.resultado}</div>`:bloqueio):''}
+    ${fotos.length?(sensivelOk?`<div class="sec-t" style="margin-bottom:10px">📸 Fotos</div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px">${fotos.map(f=>`<img src="${f.url}" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;border:1.5px solid var(--border)">`).join('')}</div>`:bloqueio):''}
   </div>`);
 }
 
@@ -1333,6 +1599,50 @@ function bindCfgEvts(){
   document.getElementById('bscfg')?.addEventListener('click',async()=>{
     const dados={...S.config,nome_profissional:document.getElementById('cn').value.trim(),crefito:document.getElementById('cc').value.trim(),clinica:document.getElementById('ccl').value.trim(),telefone:document.getElementById('ct').value.trim(),endereco:document.getElementById('ce').value.trim(),claude_api_key:document.getElementById('capi').value.trim(),prompt_avaliacao:document.getElementById('cprompt').value.trim(),pdf_cor:document.getElementById('cpdfcor').value,pdf_clinica:document.getElementById('cpdfclinica').value.trim(),pdf_rodape:document.getElementById('cpdfrodape').value.trim()};
     try{await saveCfg(dados);render();}catch(e){toast('Erro: '+e.message,'err');}
+  });
+  document.getElementById('bnprof')?.addEventListener('click',()=>modalEditProf(null));
+}
+
+function modalEditProf(id){
+  const prof=id?S.profissionais.find(p=>p.id===id):null;
+  modal(`<div class="mo-box" style="max-width:480px">
+    <div class="mo-hd"><div class="mo-t">${prof?'Editar':'Novo'} Profissional</div><button class="mo-cls" onclick="closeMo()">✕</button></div>
+    <div class="fg2">
+      <div class="fg" style="grid-column:1/-1"><label class="fl">Nome Completo *</label><input class="fi" id="pnome" value="${prof?.nome||''}"></div>
+      <div class="fg"><label class="fl">CREFITO</label><input class="fi" id="pcref" value="${prof?.crefito||''}"></div>
+      <div class="fg"><label class="fl">Nível</label>
+        <select class="fsel" id="pnivel">
+          <option value="admin" ${prof?.nivel==='admin'?'selected':''}>Administrador</option>
+          <option value="profissional" ${(!prof||prof?.nivel==='profissional')?'selected':''}>Fisioterapeuta</option>
+          <option value="auxiliar" ${prof?.nivel==='auxiliar'?'selected':''}>Auxiliar</option>
+        </select>
+      </div>
+    </div>
+    <div class="fg">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:14px">
+        <input type="checkbox" id="pacsens" style="accent-color:var(--primary)" ${prof?.acesso_sensivel!==false?'checked':''}> Acesso a dados sensíveis (fotos, avaliações IA)
+      </label>
+    </div>
+    <div class="fg">
+      <label class="fl">PIN de 4 dígitos (deixe vazio para sem PIN)</label>
+      <input class="fi" type="password" id="ppin" placeholder="••••" maxlength="4" style="max-width:120px">
+      ${prof?.pin_hash?`<div class="cfg-hint">PIN já configurado. Deixe vazio para manter ou preencha para alterar.</div>`:''}
+    </div>
+    <div class="flex gap8 mt8">
+      <button class="btn btn-p" id="bsprof" style="flex:1;justify-content:center">${prof?'Salvar':'Adicionar'}</button>
+      ${prof?`<button class="btn btn-g" style="color:#DC2626" onclick="closeMo();deleteProfissional('${prof.id}').then(()=>render())">Remover</button>`:''}
+      <button class="btn btn-s" onclick="closeMo()">Cancelar</button>
+    </div>
+  </div>`);
+
+  document.getElementById('bsprof').addEventListener('click',async()=>{
+    const nome=document.getElementById('pnome').value.trim();
+    if(!nome){toast('Nome obrigatório','err');return;}
+    const pinVal=document.getElementById('ppin').value.trim();
+    let pinHash=prof?.pin_hash||null;
+    if(pinVal){if(pinVal.length!==4||isNaN(pinVal)){toast('PIN deve ter 4 dígitos numéricos','err');return;}pinHash=await hashPIN(pinVal);}
+    const dados={id:prof?.id,nome,crefito:document.getElementById('pcref').value.trim()||null,nivel:document.getElementById('pnivel').value,acesso_sensivel:document.getElementById('pacsens').checked,pin_hash:pinHash};
+    try{await saveProfissional(dados);closeMo();render();}catch(e){toast('Erro: '+e.message,'err');}
   });
 }
 
