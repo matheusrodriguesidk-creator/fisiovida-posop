@@ -448,6 +448,34 @@
 <div id="app"></div>
 <div class="toast-c" id="tc"></div>
 <script>
+// ═══ HANDLER DE ERRO GLOBAL — PRIMEIRA COISA, captura QUALQUER erro de carga ═══
+(function(){
+  function mostrarErro(msg, extra){
+    var app=document.getElementById('app');
+    if(!app){ return; }
+    if(app.dataset && app.dataset.booted==='1') return; // app ja carregou, nao sobrescrever
+    app.innerHTML='<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#F2F4F7;padding:20px;font-family:-apple-system,sans-serif">'
+      +'<div style="background:#fff;border-radius:14px;padding:28px;max-width:460px;width:100%;box-shadow:0 4px 24px rgba(0,0,0,.1)">'
+      +'<div style="font-size:30px;margin-bottom:10px">&#9888;&#65039;</div>'
+      +'<div style="font-size:17px;font-weight:700;color:#1A1D2E;margin-bottom:8px">Erro ao carregar o app</div>'
+      +'<div style="font-size:12px;color:#DC2626;background:#FEF2F2;border-radius:8px;padding:10px;margin-bottom:6px;word-break:break-word">'+(msg||'Erro desconhecido')+'</div>'
+      +(extra?'<div style="font-size:11px;color:#9AA5B4;margin-bottom:10px">'+extra+'</div>':'')
+      +'<button onclick="location.reload()" style="margin-top:8px;padding:11px;background:#4fa0d4;color:#fff;border:none;border-radius:8px;font-size:14px;width:100%;cursor:pointer">Recarregar</button>'
+      +'</div></div>';
+  }
+  window.__fisiovidaErro=mostrarErro;
+  window.onerror=function(msg,src,line,col,err){ mostrarErro(msg, 'linha '+(line||'?')); return false; };
+  window.addEventListener('unhandledrejection',function(ev){
+    var r=ev.reason; mostrarErro((r&&r.message)?r.message:String(r), 'promessa rejeitada');
+  });
+})();
+
+// Verificar se a biblioteca Supabase carregou (CDN externo pode falhar no mobile)
+if(typeof window.supabase==='undefined'||!window.supabase||!window.supabase.createClient){
+  window.__fisiovidaErro('Não foi possível carregar as bibliotecas do sistema. Verifique sua conexão e recarregue.','biblioteca Supabase não disponível');
+  throw new Error('Supabase library not loaded');
+}
+
 const SUPA_URL='https://tvheuwykjdohdqrtwmne.supabase.co';
 const SUPA_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR2aGV1d3lramRvaGRxcnR3bW5lIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA2NzgzODMsImV4cCI6MjA5NjI1NDM4M30.CtjRgxQPa-oRV2HbkZ2HxnUJ9bbSL6LVbdPTjgT2E14';
 const AI_MODEL='claude-sonnet-4-6';
