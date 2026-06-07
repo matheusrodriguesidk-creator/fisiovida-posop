@@ -1024,21 +1024,45 @@ function restoreSessaoForm(){
 }
 
 async function boot(){
-  const{data:{session}}=await sb.auth.getSession();
-  if(session){
-    S.user=session.user;
-    await loadCfg();await loadPacs();await loadAgenda();await loadProfissionais();
-    // Restaurar profissional da sessão
-    try{const p=sessionStorage.getItem('profAtual');if(p)S.profAtual=JSON.parse(p);}catch{}
-    // Se há profissionais e nenhum selecionado → tela de seleção
-    if(S.profissionais.length>0&&!S.profAtual){
-      const app=document.getElementById('app');
-      app.innerHTML=rSelecionarProfissional();
-      return;
-    }
-    restoreView();
-  } else nav('login');
-  sb.auth.onAuthStateChange((_,s)=>{if(!s&&S.view!=='login'){sessionStorage.removeItem('profAtual');S.profAtual=null;nav('login');}});
+  try{
+    const{data:{session}}=await sb.auth.getSession();
+    if(session){
+      S.user=session.user;
+      await loadCfg();
+      await loadPacs();
+      await loadAgenda();
+      await loadProfissionais();
+      try{const p=sessionStorage.getItem('profAtual');if(p)S.profAtual=JSON.parse(p);}catch(e){}
+      if(S.profissionais.length>0&&!S.profAtual){
+        const app=document.getElementById('app');
+        if(app){app.dataset.booted='1';app.innerHTML=rSelecionarProfissional();}
+        bindProfSelect();
+        return;
+      }
+      restoreView();
+    } else nav('login');
+    const app2=document.getElementById('app');if(app2)app2.dataset.booted='1';
+    sb.auth.onAuthStateChange((_,s)=>{if(!s&&S.view!=='login'){sessionStorage.removeItem('profAtual');S.profAtual=null;nav('login');}});
+  }catch(err){
+    mostrarErroBoot(err);
+  }
+}
+
+function bindProfSelect(){
+  // cards têm onclick inline; nada extra necessário, função reservada
+}
+
+function mostrarErroBoot(err){
+  var app=document.getElementById('app');
+  if(!app)return;
+  var msg=(err&&err.message)?err.message:String(err);
+  app.innerHTML='<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#F2F4F7;padding:20px;font-family:sans-serif">'
+    +'<div style="background:#fff;border-radius:14px;padding:28px;max-width:440px;width:100%;box-shadow:0 4px 24px rgba(0,0,0,.1)">'
+    +'<div style="font-size:30px;margin-bottom:10px">&#9888;&#65039;</div>'
+    +'<div style="font-size:17px;font-weight:700;color:#1A1D2E;margin-bottom:8px">Erro ao iniciar</div>'
+    +'<div style="font-size:12px;color:#DC2626;background:#FEF2F2;border-radius:8px;padding:10px;margin-bottom:10px;word-break:break-word">'+msg+'</div>'
+    +'<button onclick="location.reload()" style="margin-top:6px;padding:10px;background:#4fa0d4;color:#fff;border:none;border-radius:8px;font-size:14px;width:100%;cursor:pointer">Recarregar</button>'
+    +'</div></div>';
 }
 async function login(email,pw){
   const{data,error}=await sb.auth.signInWithPassword({email,password:pw});
@@ -1752,6 +1776,7 @@ function nav(view,params={}){
 // ── RENDER ──
 function render(){
   const app=document.getElementById('app');
+  if(app)app.dataset.booted='1';
   if(S.view==='login'){app.innerHTML=rLogin();bindLogin();return;}
   app.innerHTML=`<div class="layout">
     <div class="sb-overlay" id="sb-overlay" onclick="closeSb()"></div>
@@ -3040,6 +3065,16 @@ window.onerror=function(msg,src,line,col,err){
   console.error('Fisiovida Error:',msg,'at',src+':'+line+':'+col,err);
   return false;
 };
+
+// Capturar promises rejeitadas (erros async que window.onerror nao pega)
+window.addEventListener('unhandledrejection',function(ev){
+  console.error('Unhandled rejection:',ev.reason);
+  var app=document.getElementById('app');
+  if(app&&!app.dataset.booted){
+    var msg=(ev.reason&&ev.reason.message)?ev.reason.message:String(ev.reason);
+    app.innerHTML='<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#F2F4F7;padding:20px;font-family:sans-serif"><div style="background:#fff;border-radius:14px;padding:28px;max-width:440px;width:100%"><div style="font-size:30px;margin-bottom:10px">&#9888;&#65039;</div><div style="font-size:17px;font-weight:700;margin-bottom:8px">Erro ao iniciar</div><div style="font-size:12px;color:#DC2626;background:#FEF2F2;border-radius:8px;padding:10px;margin-bottom:10px;word-break:break-word">'+msg+'</div><button onclick="location.reload()" style="padding:10px;background:#4fa0d4;color:#fff;border:none;border-radius:8px;width:100%;cursor:pointer">Recarregar</button></div></div>';
+  }
+});
 
 // Desregistrar qualquer Service Worker antigo e limpar caches (corrige app preso em cache)
 if('serviceWorker' in navigator){
