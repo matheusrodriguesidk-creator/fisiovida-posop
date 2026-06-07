@@ -2482,6 +2482,12 @@ function rCfg(){
     <button class="btn btn-p btn-lg" id="bscfg">Salvar Configurações</button>
 
     <div class="cfg-sec" style="margin-top:24px">
+      <div class="cfg-sec-t">💾 Backup e Dados (LGPD)</div>
+      <div style="font-size:13px;color:var(--txt3);margin-bottom:12px">Baixe uma cópia completa de todos os dados de pacientes, sessões e agenda. Guarde em local seguro — é a sua segurança e um direito do paciente.</div>
+      <button class="btn btn-s" onclick="exportarDados()">⬇ Baixar backup completo (JSON)</button>
+    </div>
+
+    <div class="cfg-sec" style="margin-top:24px">
       <div class="cfg-sec-t">👥 Profissionais</div>
       <div id="prof-list" style="margin-bottom:14px">
         ${S.profissionais.length===0?`<div style="font-size:13px;color:var(--txt3);padding:8px 0">Nenhum profissional cadastrado — conta de uso individual</div>`:S.profissionais.map(p=>`
@@ -2528,6 +2534,61 @@ function modalNovoPk(){
   document.getElementById('cpk').addEventListener('click',async()=>{
     try{await savePacote({descricao:document.getElementById('pd').value.trim(),total_sessoes:parseInt(document.getElementById('pt').value)||15,data_inicio:document.getElementById('pi').value,status:'ativo'});closeMo();setTab('pacote');}catch(e){toast('Erro: '+e.message,'err');}
   });
+}
+
+function editarEvento(id){
+  var e=S.agenda.find(function(x){return x.id===id;});
+  if(!e)return;
+  var pacs=S.pacientes||[];
+  modal('<div class="mo-box"><div class="mo-hd"><div class="mo-t">Editar Evento</div><button class="mo-cls" onclick="closeMo()">\u2715</button></div>'
+    +'<div class="fg"><label class="fl">Titulo</label><input class="fi" id="ed-tit" value="'+escH(e.titulo)+'"></div>'
+    +'<div class="fg3">'
+    +'<div class="fg"><label class="fl">Data</label><input class="fi" type="date" id="ed-data" value="'+e.data+'"></div>'
+    +'<div class="fg"><label class="fl">Inicio</label><input class="fi" type="time" id="ed-ini" value="'+(e.hora_inicio||'')+'"></div>'
+    +'<div class="fg"><label class="fl">Fim</label><input class="fi" type="time" id="ed-fim" value="'+(e.hora_fim||'')+'"></div>'
+    +'</div>'
+    +'<div class="fg"><label class="fl">Paciente</label><select class="fsel" id="ed-pac"><option value="">Sem vinculo</option>'
+    +pacs.map(function(p){return '<option value="'+p.id+'" '+(p.id===e.paciente_id?'selected':'')+'>'+escH(p.nome)+'</option>';}).join('')
+    +'</select></div>'
+    +'<div class="fg"><label class="fl">Observacoes</label><textarea class="fta" id="ed-obs" style="min-height:64px">'+escH(e.observacoes||'')+'</textarea></div>'
+    +'<div class="flex gap8 mt16"><button class="btn btn-p" id="ed-save" style="flex:1;justify-content:center">Salvar</button>'
+    +'<button class="btn btn-s" onclick="closeMo()">Cancelar</button></div></div>');
+  document.getElementById('ed-save').addEventListener('click',async function(){
+    var titulo=document.getElementById('ed-tit').value.trim();
+    if(!titulo){toast('Titulo obrigatorio','err');return;}
+    var dados={titulo:titulo,data:document.getElementById('ed-data').value,
+      hora_inicio:document.getElementById('ed-ini').value||null,
+      hora_fim:document.getElementById('ed-fim').value||null,
+      paciente_id:document.getElementById('ed-pac').value||null,
+      observacoes:document.getElementById('ed-obs').value.trim()||null};
+    try{
+      await q(function(){return sb.from('agenda').update(dados).eq('id',id);});
+      toast('Evento atualizado','ok');closeMo();await loadAgenda();render();
+    }catch(err){toast('Erro: '+err.message,'err');}
+  });
+}
+
+async function exportarDados(){
+  toast('Preparando backup...');
+  try{
+    var pacientes=await q(function(){return sb.from('pacientes').select('*,anamnese(*),pacotes(*,sessoes(*,fotos_sessao(*)))').eq('user_id',S.user.id);})||[];
+    var agenda=await q(function(){return sb.from('agenda').select('*').eq('user_id',S.user.id);})||[];
+    var backup={
+      exportado_em:new Date().toISOString(),
+      clinica:S.config.pdf_clinica||S.config.clinica||'Fisiovida',
+      total_pacientes:pacientes.length,
+      pacientes:pacientes,
+      agenda:agenda
+    };
+    var blob=new Blob([JSON.stringify(backup,null,2)],{type:'application/json'});
+    var url=URL.createObjectURL(blob);
+    var aEl=document.createElement('a');
+    aEl.href=url;
+    aEl.download='fisiovida_backup_'+new Date().toISOString().split('T')[0]+'.json';
+    document.body.appendChild(aEl);aEl.click();document.body.removeChild(aEl);
+    setTimeout(function(){URL.revokeObjectURL(url);},5000);
+    toast('Backup baixado ('+pacientes.length+' pacientes)','ok');
+  }catch(e){toast('Erro no backup: '+e.message,'err');}
 }
 
 function modalNovoEvento(dataDefault='',pacDefault=''){
@@ -2631,6 +2692,7 @@ function verEvento(id){
     <div class="flex gap8 mt16" style="flex-wrap:wrap">
       ${e.status==='agendado'?`<button class="btn btn-acc btn-sm" onclick="closeMo();updEvSt('${e.id}','realizado')">✓ Realizado</button><button class="btn btn-s btn-sm" onclick="closeMo();updEvSt('${e.id}','cancelado')">✕ Cancelar</button>`:''}
       ${e.paciente_id?`<button class="btn btn-p btn-sm" onclick="closeMo();modalMensagens('${e.id}')">💬 Mensagem</button>`:''}
+      <button class="btn btn-s btn-sm" onclick="closeMo();editarEvento('${e.id}')">✏ Editar</button>
       <button class="btn btn-g btn-sm" style="margin-left:auto;color:#DC2626" onclick="closeMo();delEv('${e.id}')">🗑 Excluir</button>
     </div>
   </div>`);
