@@ -1059,9 +1059,46 @@ async function saveCfg(dados){
 async function loadPacs(){
   S.pacientes=await q(()=>sb.from('pacientes').select('*,anamnese(*),pacotes(*,sessoes(count))').eq('user_id',S.user.id).order('created_at',{ascending:false}))||[];
 }
+
+// ── URLs ASSINADAS (bucket privado) ──
+function storagePathFromUrl(u){
+  if(!u) return null;
+  // Se ja e um path (sem http), retorna direto
+  if(u.indexOf('http')!==0) return u;
+  // Extrai path apos /fisiovida/ de URLs publicas antigas
+  var m=u.match(/\/fisiovida\/(.+?)(\?|$)/);
+  return m?m[1]:null;
+}
+
+async function assinarFotosPac(pac){
+  if(!pac||!pac.pacotes) return;
+  // Coletar todos os paths
+  var fotos=[];
+  pac.pacotes.forEach(function(pk){
+    (pk.sessoes||[]).forEach(function(s){
+      (s.fotos_sessao||[]).forEach(function(f){ fotos.push(f); });
+    });
+  });
+  if(!fotos.length) return;
+  var paths=fotos.map(function(f){ return storagePathFromUrl(f.url); }).filter(Boolean);
+  if(!paths.length) return;
+  try{
+    var res=await sb.storage.from('fisiovida').createSignedUrls(paths, 3600);
+    if(res&&res.data){
+      var map={};
+      res.data.forEach(function(item){ if(item.path&&item.signedUrl) map[item.path]=item.signedUrl; });
+      fotos.forEach(function(f){
+        var p=storagePathFromUrl(f.url);
+        if(p&&map[p]) f.url=map[p];
+      });
+    }
+  }catch(e){ console.error('Erro ao assinar fotos',e); }
+}
+
 async function loadPac(id){
   const rows=await q(()=>sb.from('pacientes').select('*,anamnese(*),pacotes(*,sessoes(*,fotos_sessao(*)))').eq('id',id).eq('user_id',S.user.id).limit(1));
   S.pac=rows?.[0]||null;
+  if(S.pac) await assinarFotosPac(S.pac);
 }
 async function savePac(dados){
   if(dados.id){await q(()=>sb.from('pacientes').update(dados).eq('id',dados.id));toast('Paciente atualizado','ok');}
@@ -1089,9 +1126,8 @@ async function saveSessao(dados){
     const blob=await compImg(S.fotos[i]);const path=`sessoes/${sessao.id}/${Date.now()}_${i}.jpg`;
     const{error:upErr}=await sb.storage.from('fisiovida').upload(path,blob,{contentType:'image/jpeg'});
     if(!upErr){
-      const{data:ud}=sb.storage.from('fisiovida').getPublicUrl(path);
       const regiao=S.fotosRegioes?.[i]||null;
-      await q(()=>sb.from('fotos_sessao').insert({sessao_id:sessao.id,url:ud.publicUrl,ordem:i,referencia_escala:regiao}));
+      await q(()=>sb.from('fotos_sessao').insert({sessao_id:sessao.id,url:path,ordem:i,referencia_escala:regiao}));
     }
   }
   toast(`Sessão ${n} registrada`,'ok');S.fotos=[];S.fotosRegioes=[];return sessao;
