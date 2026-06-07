@@ -450,6 +450,9 @@
       .ph{padding:14px 14px 0;}
       .ph-title{font-size:19px;}
     }
+    .mod-chips{display:flex;flex-wrap:wrap;gap:6px;}
+    .mod-chip{font-size:12px;padding:5px 11px;border-radius:16px;border:1.5px solid var(--border);background:var(--surface);color:var(--txt2);cursor:pointer;transition:background-color .15s,border-color .15s,color .15s;}
+    .mod-chip:hover{background:var(--primary-lt);border-color:var(--primary);color:var(--primary-dk);}
     @keyframes spin{to{transform:rotate(360deg);}}
     @keyframes fi{to{opacity:1;}}
     @keyframes su{from{transform:translateY(16px);opacity:0;}to{transform:translateY(0);opacity:1;}}
@@ -2349,7 +2352,7 @@ function rPac(){
         <button class="btn btn-p btn-sm" onclick="nav('sessao')">+ Nova Sessão</button>
         <div class="pdf-btns">
           <button class="btn btn-s btn-sm" onclick="gerarRelatorioPaciente()">📄 Relatório</button>
-          <button class="btn btn-s btn-sm" onclick="gerarProntuario()">📋 Prontuário</button>
+          <button class="btn btn-s btn-sm" onclick="gerarProntuario()">🖨 Imprimir/Exportar</button>
           ${(pk?.sessoes?.length>=pk?.total_sessoes&&pk?.total_sessoes>0)?`<button class="btn btn-acc btn-sm" onclick="gerarRelatorioAlta()">🎓 Alta</button>`:''}
           ${(pk?.sessoes||[]).filter(s=>s.fotos_sessao?.length).length>=2?`<button class="btn btn-s btn-sm" onclick="modalSliderAntesDepois()">👁 Antes/Depois</button>`:''}
         </div>
@@ -2406,19 +2409,47 @@ function rProntuario(){
     +lista;
 }
 
+var MODELOS_EVOLUCAO={
+  'SOAP':'S (Subjetivo): \nO (Objetivo): \nA (Avaliação): \nP (Plano/Conduta): ',
+  'Avaliação inicial':'Queixa principal: \nHistória da cirurgia: \nInspeção (edema/equimose/cicatriz): \nPalpação (fibrose/aderências): \nPerimetria: \nDor (EVA 0-10): \nObjetivos do tratamento: \nConduta proposta: ',
+  'Evolução de sessão':'Estado atual: \nProcedimentos realizados: \nResposta ao tratamento: \nEvolução do edema/fibrose: \nOrientações ao paciente: \nConduta próxima sessão: ',
+  'Intercorrência':'Descrição da intercorrência: \nConduta adotada: \nOrientações / encaminhamentos: ',
+  'Alta':'Resumo da evolução: \nObjetivos alcançados: \nEstado na alta: \nOrientações pós-alta: '
+};
+function inserirModelo(nome){
+  var t=document.getElementById('ev-conteudo'); if(!t)return;
+  var modelo=MODELOS_EVOLUCAO[nome]||'';
+  if(t.value.trim()&&!confirm('Substituir o texto atual pelo modelo "'+nome+'"?')) return;
+  t.value=modelo; t.focus();
+  // posiciona cursor na primeira linha
+  t.setSelectionRange(modelo.indexOf(': ')+2, modelo.indexOf(': ')+2);
+}
+function inserirEVA(){
+  var t=document.getElementById('ev-conteudo'); if(!t)return;
+  var v=document.getElementById('ev-eva').value;
+  if(v==='')return;
+  var linha='Dor (EVA): '+v+'/10';
+  t.value=(t.value.trim()?t.value.replace(/\s*$/,'')+'\n':'')+linha;
+  t.focus();
+}
 function modalEvolucao(id){
   var ev = id ? (S.evolucao||[]).find(function(x){return x.id===id;}) : null;
   var hoje=new Date().toISOString().split('T')[0];
-  var tipos=['Evolução','Avaliação inicial','Avaliação','Intercorrência','Observação','Alta'];
-  var autorPadrao=(S.profAtual&&S.profAtual.nome)||S.config.nome_profissional||'';
-  modal('<div class="mo-box" style="max-width:620px"><div class="mo-hd"><div class="mo-t">'+(id?'Editar anotação':'Nova anotação')+'</div><button class="mo-cls" onclick="closeMo()">\u2715</button></div>'
+  var tipos=['Evolução','Avaliação inicial','Avaliação','Reavaliação','Sessão','Intercorrência','Observação','Orientação','Encaminhamento','Alta'];
+  var modelos=['SOAP','Avaliação inicial','Evolução de sessão','Intercorrência','Alta'];
+  var chipsModelo=modelos.map(function(m){return '<button type="button" class="mod-chip" onclick="inserirModelo(\''+m+'\')">'+m+'</button>';}).join('');
+  modal('<div class="mo-box" style="max-width:640px"><div class="mo-hd"><div class="mo-t">'+(id?'Editar anotação':'Nova anotação')+'</div><button class="mo-cls" onclick="closeMo()">\u2715</button></div>'
     +'<div class="fg3">'
     +'<div class="fg"><label class="fl">Data</label><input class="fi" type="date" id="ev-data" value="'+(ev?ev.data:hoje)+'"></div>'
     +'<div class="fg" style="grid-column:span 2"><label class="fl">Tipo</label><input class="fi" id="ev-tipo" list="ev-tipos" value="'+(ev?escH(ev.tipo):'Evolução')+'"><datalist id="ev-tipos">'+tipos.map(function(t){return '<option value="'+t+'">';}).join('')+'</datalist></div>'
     +'</div>'
-    +'<div class="fg"><label class="fl">Anotação clínica</label><textarea class="fta" id="ev-conteudo" style="min-height:180px;line-height:1.6" placeholder="Descreva a evolução, conduta, resposta ao tratamento, orientações...">'+(ev?escH(ev.conteudo):'')+'</textarea></div>'
-    +'<div style="font-size:11px;color:var(--txt3);margin:-4px 0 12px">Dica: você pode estruturar como S (subjetivo), O (objetivo), A (avaliação), P (plano) — ou texto livre.</div>'
-    +'<div class="flex gap8"><button class="btn btn-p" id="ev-save" style="flex:1;justify-content:center">'+(id?'Salvar alterações':'Adicionar ao prontuário')+'</button>'
+    +'<div class="fg"><label class="fl">Modelos prontos</label><div class="mod-chips">'+chipsModelo+'</div></div>'
+    +'<div class="fg"><label class="fl">Anotação clínica</label><textarea class="fta" id="ev-conteudo" style="min-height:200px;line-height:1.6" placeholder="Descreva a evolução, conduta, resposta ao tratamento, orientações... ou use um modelo acima.">'+(ev?escH(ev.conteudo):'')+'</textarea></div>'
+    +'<div class="fg3" style="align-items:end">'
+    +'<div class="fg" style="grid-column:span 2"><label class="fl">Escala de dor (EVA 0-10)</label><input class="fi" type="number" min="0" max="10" id="ev-eva" placeholder="ex: 3"></div>'
+    +'<div class="fg"><button type="button" class="btn btn-s" style="width:100%;justify-content:center" onclick="inserirEVA()">+ Inserir dor</button></div>'
+    +'</div>'
+    +'<div class="flex gap8" style="margin-top:6px"><button class="btn btn-p" id="ev-save" style="flex:1;justify-content:center">'+(id?'Salvar alterações':'Adicionar ao prontuário')+'</button>'
     +'<button class="btn btn-s" onclick="closeMo()">Cancelar</button></div></div>');
   document.getElementById('ev-save').addEventListener('click',function(){ salvarEvolucao(id); });
   setTimeout(function(){var t=document.getElementById('ev-conteudo');if(t)t.focus();},100);
