@@ -448,6 +448,24 @@
 <div id="app"></div>
 <div class="toast-c" id="tc"></div>
 <script>
+// ═══ ANTI-CACHE: se houver Service Worker controlando a pagina, mata e recarrega UMA vez ═══
+(function(){
+  try{
+    if('serviceWorker' in navigator && navigator.serviceWorker.controller){
+      if(!sessionStorage.getItem('_fv_swkill')){
+        sessionStorage.setItem('_fv_swkill','1');
+        navigator.serviceWorker.getRegistrations().then(function(rs){
+          return Promise.all(rs.map(function(r){return r.unregister();}));
+        }).then(function(){
+          if(window.caches && caches.keys){
+            return caches.keys().then(function(ks){return Promise.all(ks.map(function(k){return caches.delete(k);}));});
+          }
+        }).then(function(){ location.reload(); });
+      }
+    }
+  }catch(e){}
+})();
+
 // ═══ HANDLER DE ERRO GLOBAL — PRIMEIRA COISA, captura QUALQUER erro de carga ═══
 (function(){
   function mostrarErro(msg, extra){
