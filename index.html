@@ -2034,6 +2034,7 @@ function rDash(){
   </div>`;
 }
 function rPacCard(p){
+  if(!p)return'';
   const a=p.anamnese?.[0],pk=p.pacotes?.find(pk=>pk.status==='ativo');
   let feitas=0;if(pk?.sessoes){if(Array.isArray(pk.sessoes))feitas=pk.sessoes.length;else if(pk.sessoes[0]?.count!==undefined)feitas=pk.sessoes[0].count;}
   const total=pk?.total_sessoes||0,pct=total>0?Math.round((feitas/total)*100):0,fase=calcFase(a?.data_cirurgia);
@@ -2047,6 +2048,7 @@ function rPacCard(p){
 
 // ── AGENDA ──
 function rAgendaItem(e,showDate){
+  if(!e)return'';
   const pac=(S.pacientes||[]).find(function(p){return p.id===e.paciente_id;});
   const stCls={agendado:'b-p',realizado:'b-acc',cancelado:'b-f1'};
   const stLbl={agendado:'Agendado',realizado:'Realizado',cancelado:'Cancelado'};
@@ -2294,7 +2296,7 @@ function rAnam(){
   var a=S.pac&&S.pac.anamnese&&S.pac.anamnese[0]?S.pac.anamnese[0]:{};
   var COMORBS=['Diabetes','Hipertensao','Obesidade','Tabagismo','Cardiopatia','Coagulopatia','Hipotireoidismo','Depressao/Ansiedade','Cicatriz queloide'];
   var ANES=['Local','Sedacao','Raquidiana','Peridural','Geral'];
-  var comorbSalvas=(a.comorbidades||'').split(',').map(function(x){return x.trim();}).filter(Boolean);
+  var comorbSalvas=(Array.isArray(a.comorbidades)?a.comorbidades:String(a.comorbidades||'').split(',')).map(function(x){return String(x).trim();}).filter(Boolean);
   var temOutro=comorbSalvas.some(function(x){return COMORBS.indexOf(x)<0;});
   var outroComorb=comorbSalvas.filter(function(x){return COMORBS.indexOf(x)<0;}).join(', ');
 
@@ -3061,12 +3063,12 @@ async function openPac(id){await loadPac(id);S.tab='timeline';S.editAnam=false;n
 
 
 function toggleSb(){
-  document.querySelector('.sidebar').classList.toggle('open');
-  document.getElementById('sb-overlay').classList.toggle('open');
+  var sb=document.querySelector('.sidebar');if(sb)sb.classList.toggle('open');
+  var ov=document.getElementById('sb-overlay');if(ov)ov.classList.toggle('open');
 }
 function closeSb(){
-  document.querySelector('.sidebar').classList.remove('open');
-  document.getElementById('sb-overlay').classList.remove('open');
+  var sb=document.querySelector('.sidebar');if(sb)sb.classList.remove('open');
+  var ov=document.getElementById('sb-overlay');if(ov)ov.classList.remove('open');
 }
 window.onerror=function(msg,src,line,col,err){
   var app=document.getElementById('app');
