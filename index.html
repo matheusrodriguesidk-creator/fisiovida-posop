@@ -1020,7 +1020,7 @@ async function gerarRelatorioAlta(){
     content.push({canvas:[{type:'line',x1:0,y1:0,x2:515,y2:0,lineWidth:0.5,lineColor:'#DDE2EA'}],margin:[0,0,0,12]});
     content.push({text:'Evolucao do Tratamento',fontSize:fs+1,bold:true,color:'#1A1D2E',margin:[0,0,0,8]});
     const imgG=graficoParaPDF(S.evolucaoIA);
-    if(imgG) content.push({image:imgG,width:460,margin:[0,0,0,8]});
+    if(imgG) content.push({image:imgG,fit:[460,210],margin:[0,0,0,8]});
     if(S.evolucaoIA.resumo) content.push({text:limparMD(S.evolucaoIA.resumo),fontSize:fs-1,color:'#4A5568',italics:true,margin:[0,0,0,14]});
   }
 
@@ -1043,15 +1043,17 @@ async function gerarRelatorioAlta(){
   }
 
   // RODAPE
-  content.push({canvas:[{type:'line',x1:0,y1:0,x2:515,y2:0,lineWidth:1,lineColor:cor}],margin:[0,24,0,12]});
-  content.push({columns:[
-    {text:S.config.pdf_rodape||'',fontSize:fs-2,color:'#9AA5B4',width:'*'},
-    {stack:[
-      {canvas:[{type:'line',x1:30,y1:0,x2:160,y2:0,lineWidth:1,lineColor:'#D4CDC4'}]},
-      {text:S.config.nome_profissional||'Profissional',fontSize:fs-1,bold:true,color:'#1A1D2E',alignment:'center',margin:[0,4,0,0]},
-      {text:S.config.crefito||'',fontSize:fs-2,color:'#4A5568',alignment:'center'}
-    ],width:190}
-  ]});
+  content.push({stack:[
+    {canvas:[{type:'line',x1:0,y1:0,x2:515,y2:0,lineWidth:1,lineColor:cor}],margin:[0,18,0,10]},
+    {columns:[
+      {text:S.config.pdf_rodape||'',fontSize:fs-2,color:'#9AA5B4',width:'*'},
+      {stack:[
+        {canvas:[{type:'line',x1:30,y1:0,x2:160,y2:0,lineWidth:1,lineColor:'#D4CDC4'}]},
+        {text:S.config.nome_profissional||'Profissional',fontSize:fs-1,bold:true,color:'#1A1D2E',alignment:'center',margin:[0,4,0,0]},
+        {text:S.config.crefito||'',fontSize:fs-2,color:'#4A5568',alignment:'center'}
+      ],width:190}
+    ]}
+  ],unbreakable:true});
 
   const pgSize=cfgPDF.pagina||'A4';
   const mg=[cfgPDF.margem_h||40,cfgPDF.margem_v||40,cfgPDF.margem_h||40,cfgPDF.margem_v||56];
@@ -1651,7 +1653,7 @@ async function gerarRelatorioPaciente(){
     if(imgG){
       content.push({canvas:[{type:'line',x1:0,y1:0,x2:515,y2:0,lineWidth:0.5,lineColor:'#DDE2EA'}],margin:[0,0,0,12]});
       content.push({text:'Grafico de Evolucao',fontSize:fs+1,bold:true,color:'#1A1D2E',margin:[0,0,0,8]});
-      content.push({image:imgG,width:480,margin:[0,0,0,6]});
+      content.push({image:imgG,fit:[480,210],margin:[0,0,0,6]});
       if(S.evolucaoIA.resumo) content.push({text:S.evolucaoIA.resumo,fontSize:fs-1,color:'#4A5568',italics:true,margin:[0,0,0,16]});
     }
   }
@@ -1666,55 +1668,51 @@ async function gerarRelatorioPaciente(){
       const fk=s.fase_cicatrizacao||'fase-3';
       const fCor=fCorMap[fk]||cor;
 
-      // Linha da sessao
-      content.push({
-        columns:[
-          {text:'Sessao '+s.numero_sessao,fontSize:fs,bold:true,color:cor,width:'auto'},
-          {canvas:[{type:'line',x1:0,y1:5,x2:300,y2:5,lineWidth:0.5,lineColor:'#DDE2EA'}],margin:[8,0,8,0],width:'*'},
-          {text:fmtD(s.data_sessao),fontSize:fs-1,color:'#9AA5B4',width:'auto'},
-          {text:fNomeMap[fk]||'',fontSize:fs-2,bold:true,color:fCor,width:'auto'}
-        ],columnGap:6,margin:[0,0,0,6]
-      });
-
+      // Cabecalho da sessao — bloco indivisivel (nunca quebra entre titulo e conteudo)
+      const headStack=[
+        {columns:[
+          {text:'Sessao '+s.numero_sessao,fontSize:fs,bold:true,color:cor,width:'*'},
+          {text:fmtD(s.data_sessao),fontSize:fs-1,color:'#9AA5B4',width:'auto',margin:[0,1,0,0]},
+          {text:'   '+(fNomeMap[fk]||''),fontSize:fs-2,bold:true,color:fCor,width:'auto',margin:[0,1,0,0]}
+        ],columnGap:6,margin:[0,0,0,5]},
+        {canvas:[{type:'line',x1:0,y1:0,x2:515,y2:0,lineWidth:0.5,lineColor:'#DDE2EA'}],margin:[0,0,0,6]}
+      ];
       if(procs.length){
-        content.push({text:'Procedimentos: '+procs.join(', '),fontSize:fs-1,color:'#4A5568',margin:[0,0,0,4]});
+        headStack.push({text:[{text:'Procedimentos: ',bold:true,color:'#1A1D2E'},{text:procs.join(', '),color:'#4A5568'}],fontSize:fs-1,margin:[0,0,0,4]});
       }
+      content.push({stack:headStack,unbreakable:true,margin:[0,idx>0?12:0,0,0]});
+
       if(s.notas){
-        content.push({text:'Evolucao: '+s.notas,fontSize:fs-1,color:'#4A5568',lineHeight:1.5,margin:[0,0,0,4]});
+        content.push({text:[{text:'Evolucao: ',bold:true,color:'#1A1D2E'},{text:s.notas,color:'#4A5568'}],fontSize:fs-1,lineHeight:1.5,margin:[0,0,0,4]});
       }
       if(cfgPDF.incluir_ia!==false&&s.avaliacao_ia?.resultado){
-        const textoLimpo=limparMD(s.avaliacao_ia.resultado);
-        content.push({
-          text:textoLimpo,
-          fontSize:fs-1,color:'#3a4163',lineHeight:1.6,
-          margin:[0,0,0,4]
-        });
+        content.push({text:limparMD(s.avaliacao_ia.resultado),fontSize:fs-1,color:'#3a4163',lineHeight:1.6,margin:[0,0,0,4]});
       }
       if(cfgPDF.incluir_fotos!==false&&fotosMap[s.id]?.length){
-        const cols=fotosMap[s.id].map(f=>({stack:[
-          {image:f.b64,width:100,height:100,fit:[100,100]},
-          f.regiao?{text:f.regiao,fontSize:fs-3,color:'#9AA5B4',alignment:'center',margin:[0,2,0,0]}:{text:''}
-        ]}));
-        content.push({columns:cols,columnGap:8,margin:[0,6,0,0]});
-      }
-
-      // Separador entre sessoes
-      if(idx<sessoes.length-1){
-        content.push({canvas:[{type:'line',x1:0,y1:0,x2:515,y2:0,lineWidth:0.5,lineColor:'#DDE2EA'}],margin:[0,10,0,10]});
+        const fotos=fotosMap[s.id];
+        for(let r=0;r<fotos.length;r+=4){
+          const linha=fotos.slice(r,r+4).map(f=>({width:'auto',stack:[
+            {image:f.b64,width:108,height:108,fit:[108,108]},
+            f.regiao?{text:f.regiao,fontSize:fs-3,color:'#9AA5B4',alignment:'center',margin:[0,2,0,0]}:{text:''}
+          ]}));
+          content.push({columns:linha,columnGap:8,margin:[0,6,0,0],unbreakable:true});
+        }
       }
     });
   }
 
   // ── RODAPE ──
-  content.push({canvas:[{type:'line',x1:0,y1:0,x2:515,y2:0,lineWidth:1,lineColor:cor}],margin:[0,24,0,12]});
-  content.push({columns:[
-    {text:S.config.pdf_rodape||'',fontSize:fs-2,color:'#9AA5B4',width:'*'},
-    {stack:[
-      {canvas:[{type:'line',x1:30,y1:0,x2:160,y2:0,lineWidth:1,lineColor:'#D4CDC4'}]},
-      {text:S.config.nome_profissional||'Profissional',fontSize:fs-1,bold:true,color:'#1A1D2E',alignment:'center',margin:[0,4,0,0]},
-      {text:S.config.crefito||'',fontSize:fs-2,color:'#4A5568',alignment:'center'}
-    ],width:190}
-  ]});
+  content.push({stack:[
+    {canvas:[{type:'line',x1:0,y1:0,x2:515,y2:0,lineWidth:1,lineColor:cor}],margin:[0,18,0,10]},
+    {columns:[
+      {text:S.config.pdf_rodape||'',fontSize:fs-2,color:'#9AA5B4',width:'*'},
+      {stack:[
+        {canvas:[{type:'line',x1:30,y1:0,x2:160,y2:0,lineWidth:1,lineColor:'#D4CDC4'}]},
+        {text:S.config.nome_profissional||'Profissional',fontSize:fs-1,bold:true,color:'#1A1D2E',alignment:'center',margin:[0,4,0,0]},
+        {text:S.config.crefito||'',fontSize:fs-2,color:'#4A5568',alignment:'center'}
+      ],width:190}
+    ]}
+  ],unbreakable:true});
 
   const pgSize=cfgPDF.pagina||'A4';
   const mg=[cfgPDF.margem_h||40,cfgPDF.margem_v||40,cfgPDF.margem_h||40,cfgPDF.margem_v||56];
@@ -1793,37 +1791,36 @@ function gerarProntuario(){
       const fk=s.fase_cicatrizacao||'fase-3';
       const fCor=fCorMap[fk]||cor;
 
-      content.push({
-        columns:[
-          {text:'Sessao '+s.numero_sessao,fontSize:fs,bold:true,color:cor,width:'auto'},
-          {canvas:[{type:'line',x1:0,y1:5,x2:260,y2:5,lineWidth:0.5,lineColor:'#DDE2EA'}],margin:[6,0,6,0],width:'*'},
-          {text:fmtD(s.data_sessao),fontSize:fs-1,color:'#9AA5B4',width:'auto'},
-          {text:fNomeMap[fk]||'',fontSize:fs-2,bold:true,color:fCor,width:'auto'}
-        ],columnGap:4,margin:[0,0,0,4]
-      });
+      const headStack=[
+        {columns:[
+          {text:'Sessao '+s.numero_sessao,fontSize:fs,bold:true,color:cor,width:'*'},
+          {text:fmtD(s.data_sessao),fontSize:fs-1,color:'#9AA5B4',width:'auto',margin:[0,1,0,0]},
+          {text:'   '+(fNomeMap[fk]||''),fontSize:fs-2,bold:true,color:fCor,width:'auto',margin:[0,1,0,0]}
+        ],columnGap:4,margin:[0,0,0,4]},
+        {canvas:[{type:'line',x1:0,y1:0,x2:515,y2:0,lineWidth:0.5,lineColor:'#DDE2EA'}],margin:[0,0,0,5]}
+      ];
+      if(procs.length) headStack.push({text:[{text:'Procedimentos: ',bold:true,color:'#1A1D2E'},{text:procs.join(', '),color:'#4A5568'}],fontSize:fs-1,margin:[0,0,0,3]});
+      content.push({stack:headStack,unbreakable:true,margin:[0,idx>0?10:0,0,0]});
 
-      if(procs.length) content.push({text:'Procedimentos: '+procs.join(', '),fontSize:fs-1,color:'#4A5568',margin:[0,0,0,3]});
-      if(s.notas) content.push({text:'Evolucao: '+s.notas,fontSize:fs-1,color:'#4A5568',lineHeight:1.5,margin:[0,0,0,3]});
+      if(s.notas) content.push({text:[{text:'Evolucao: ',bold:true,color:'#1A1D2E'},{text:s.notas,color:'#4A5568'}],fontSize:fs-1,lineHeight:1.5,margin:[0,0,0,3]});
       if(s.avaliacao_ia?.resultado){
         content.push({text:limparMD(s.avaliacao_ia.resultado),fontSize:fs-1,color:'#3a4163',lineHeight:1.6,margin:[0,0,0,3]});
-      }
-
-      if(idx<sessoes.length-1){
-        content.push({canvas:[{type:'line',x1:0,y1:0,x2:515,y2:0,lineWidth:0.3,lineColor:'#EEE'}],margin:[0,8,0,8]});
       }
     });
   });
 
   // RODAPE
-  content.push({canvas:[{type:'line',x1:0,y1:0,x2:515,y2:0,lineWidth:1,lineColor:cor}],margin:[0,24,0,12]});
-  content.push({columns:[
-    {text:S.config.pdf_rodape||'',fontSize:fs-2,color:'#9AA5B4',width:'*'},
-    {stack:[
-      {canvas:[{type:'line',x1:30,y1:0,x2:160,y2:0,lineWidth:1,lineColor:'#D4CDC4'}]},
-      {text:S.config.nome_profissional||'Profissional',fontSize:fs-1,bold:true,color:'#1A1D2E',alignment:'center',margin:[0,4,0,0]},
-      {text:S.config.crefito||'',fontSize:fs-2,color:'#4A5568',alignment:'center'}
-    ],width:190}
-  ]});
+  content.push({stack:[
+    {canvas:[{type:'line',x1:0,y1:0,x2:515,y2:0,lineWidth:1,lineColor:cor}],margin:[0,18,0,10]},
+    {columns:[
+      {text:S.config.pdf_rodape||'',fontSize:fs-2,color:'#9AA5B4',width:'*'},
+      {stack:[
+        {canvas:[{type:'line',x1:30,y1:0,x2:160,y2:0,lineWidth:1,lineColor:'#D4CDC4'}]},
+        {text:S.config.nome_profissional||'Profissional',fontSize:fs-1,bold:true,color:'#1A1D2E',alignment:'center',margin:[0,4,0,0]},
+        {text:S.config.crefito||'',fontSize:fs-2,color:'#4A5568',alignment:'center'}
+      ],width:190}
+    ]}
+  ],unbreakable:true});
 
   const pgSize=cfgPDF.pagina||'A4';
   const mg=[cfgPDF.margem_h||40,cfgPDF.margem_v||40,cfgPDF.margem_h||40,cfgPDF.margem_v||56];
