@@ -1956,8 +1956,9 @@ function rDash(){
     <div class="search-bar"><span class="search-ic">⌕</span><input type="text" id="busca" placeholder="Buscar por nome ou cirurgia..."></div>
     <div class="pg" id="pg">${pacs.length===0
       ?`<div style="grid-column:1/-1;text-align:center;padding:48px;color:var(--txt3)"><div style="font-size:48px;margin-bottom:12px">🌿</div><div style="font-size:16px;font-weight:600;color:var(--txt2)">Nenhum paciente ainda</div></div>`
-      :pacs.map(rPacCard).join('')}
+      :pacs.slice(0,60).map(rPacCard).join('')}
     </div>
+    ${pacs.length>60?`<div style="text-align:center;padding:16px;color:var(--txt3);font-size:13px">Mostrando 60 de ${pacs.length}. Use a busca para encontrar pacientes específicos.</div>`:''}
 
   </div>`;
 }
@@ -2680,22 +2681,32 @@ function verSessao(id){
 // ── BINDINGS ──
 function bindAll(){bindDash();bindAgendaEvts();bindSessEvts();bindCfgEvts();bindTabEvts();}
 
+let _buscaTimer=null;
 function bindDash(){
-  document.getElementById('bnp')?.addEventListener('click',()=>{S.pac=null;modalNovoPac();});
-  document.getElementById('busca')?.addEventListener('input',e=>{
-    const q2=e.target.value.toLowerCase(),pg=document.getElementById('pg');if(!pg)return;
-    const fs=S.pacientes.filter(p=>{const a=p.anamnese?.[0];return p.nome.toLowerCase().includes(q2)||(a?.tipo_cirurgia||'').toLowerCase().includes(q2);});
-    pg.innerHTML=fs.length?fs.map(rPacCard).join(''):'<div style="grid-column:1/-1;text-align:center;padding:48px;color:var(--txt3)">Nenhum paciente encontrado</div>';
-  });
+  var bnp=document.getElementById('bnp');
+  if(bnp&&!bnp.dataset.bound){bnp.dataset.bound='1';bnp.addEventListener('click',function(){S.pac=null;modalNovoPac();});}
+  var busca=document.getElementById('busca');
+  if(busca&&!busca.dataset.bound){
+    busca.dataset.bound='1';
+    busca.addEventListener('input',function(e){
+      clearTimeout(_buscaTimer);
+      var val=e.target.value.toLowerCase();
+      _buscaTimer=setTimeout(function(){
+        var pg=document.getElementById('pg');if(!pg)return;
+        var fs=val?S.pacientes.filter(function(p){
+          var a=p.anamnese&&p.anamnese[0];
+          return p.nome.toLowerCase().indexOf(val)>=0||((a&&a.tipo_cirurgia||'').toLowerCase().indexOf(val)>=0);
+        }):S.pacientes;
+        var lim=fs.slice(0,60);
+        pg.innerHTML=lim.length?lim.map(rPacCard).join(''):'<div style="grid-column:1/-1;text-align:center;padding:48px;color:var(--txt3)">Nenhum paciente encontrado</div>';
+      },250);
+    });
+  }
 }
 
 function bindAgendaEvts(){
-  document.getElementById('bne')?.addEventListener('click',()=>modalNovoEvento());
-  // Rebind dos botões de troca de view
-  document.querySelectorAll('.ag-tab').forEach(t=>{
-    const map={'Hoje':'hoje','Semana':'semana','Mes':'mes'};
-    t.addEventListener('click',()=>{ const v=map[t.textContent.trim()]; if(v)setAgView(v); });
-  });
+  var b=document.getElementById('bne');
+  if(b&&!b.dataset.bound){b.dataset.bound='1';b.addEventListener('click',function(){modalNovoEvento();});}
 }
 function navSemana(d,reset=false){
   S.semanaOffset=reset?0:S.semanaOffset+d;
@@ -2932,8 +2943,14 @@ window.onerror=function(msg,src,line,col,err){
   return false;
 };
 
+// Desregistrar qualquer Service Worker antigo e limpar caches (corrige app preso em cache)
 if('serviceWorker' in navigator){
-  navigator.serviceWorker.register('/sw.js').catch(function(){});
+  navigator.serviceWorker.getRegistrations().then(function(regs){
+    regs.forEach(function(reg){reg.unregister();});
+  }).catch(function(){});
+  if(window.caches&&caches.keys){
+    caches.keys().then(function(keys){keys.forEach(function(k){caches.delete(k);});}).catch(function(){});
+  }
 }
 boot();
 </script>
