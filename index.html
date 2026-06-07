@@ -58,7 +58,9 @@
     }
     html,body{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--txt);font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased;}
     #app{height:100%;display:flex;flex-direction:column;}
-    .layout{display:flex;height:100%;}
+    html,body{overflow-x:hidden;max-width:100%;}
+    .layout{display:flex;height:100%;max-width:100%;overflow-x:hidden;}
+    .main{max-width:100%;overflow-x:hidden;}
 
     /* ── SIDEBAR ── */
     .sidebar{width:var(--sw);background:linear-gradient(180deg,#2a3057 0%,#3a4163 40%,#2d6fa0 100%);display:flex;flex-direction:column;flex-shrink:0;position:fixed;left:0;top:0;bottom:0;height:100vh;z-index:160;transform:translateX(-100%);transition:transform .25s;overflow:hidden;}
@@ -334,6 +336,9 @@
       .mo{align-items:flex-end;padding:0;}
       .mo-box{border-radius:20px 20px 0 0;max-height:90vh;width:100%;max-width:100%;}
       .card{padding:14px;}
+      .kpi-grid{grid-template-columns:repeat(2,1fr)!important;gap:10px;margin-bottom:18px;}
+      .dash-grid{grid-template-columns:1fr!important;gap:14px;}
+      .kpi-grid .card{padding:12px;}
     }
 
     /* ── AGENDA SEMANAL ── */
@@ -428,6 +433,10 @@
     .anam-check{display:flex;align-items:center;gap:6px;padding:6px 12px;border-radius:20px;border:1.5px solid var(--border);cursor:pointer;font-size:13px;color:var(--txt2);transition:all .15s;user-select:none;}
     .anam-check:has(input:checked){background:var(--primary-lt);border-color:var(--primary);color:var(--primary-dk);}
     .anam-checks{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;}
+    .kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:28px;}
+    .dash-grid{display:grid;grid-template-columns:1fr 340px;gap:20px;align-items:start;margin-bottom:24px;}
+    .dash-grid > *{min-width:0;}
+    .kpi-grid > *{min-width:0;}
     @keyframes spin{to{transform:rotate(360deg);}}
     @keyframes fi{to{opacity:1;}}
     @keyframes su{from{transform:translateY(16px);opacity:0;}to{transform:translateY(0);opacity:1;}}
@@ -1763,6 +1772,7 @@ function gerarProntuario(){
 }
 function nav(view,params={}){
   S.view=view;S.params=params;
+  try{closeSb();}catch(e){}
   // Salvar no hash para sobreviver ao reload
   let hash=view;
   if(view==='paciente'&&S.pac?.id) hash='paciente/'+S.pac.id+'/'+S.tab;
@@ -1901,7 +1911,7 @@ function rDash(){
   <div class="pc">
 
     <!-- KPIs -->
-    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:28px">
+    <div class="kpi-grid">
       ${[
         {label:'Pacientes Ativos',val:ativos,icon:'👥',cor:'var(--primary)',sub:'com pacote ativo'},
         {label:'Agenda Hoje',val:agendaHojeEvs.length,icon:'📅',cor:'var(--accent)',sub:'compromissos',onclick:"S.agView='hoje';nav('agenda')"},
@@ -1918,7 +1928,7 @@ function rDash(){
         </div>`).join('')}
     </div>
 
-    <div class="dash-grid" style="display:grid;grid-template-columns:1fr 340px;gap:20px;align-items:start">
+    <div class="dash-grid" class="dash-grid">
       <div style="display:flex;flex-direction:column;gap:20px">
 
         <!-- Agenda do Dia -->
@@ -3038,7 +3048,15 @@ function updIA(){const b=document.getElementById('baia');if(b)b.disabled=!S.foto
 function navMes(d){S.calMes+=d;if(S.calMes<0){S.calMes=11;S.calAno--;}if(S.calMes>11){S.calMes=0;S.calAno++;}S.calDiaSel=null;const el=document.getElementById('mc');if(el)el.innerHTML=rView();bindAll();}
 function selDia(d){S.calDiaSel=S.calDiaSel===d?null:d;const el=document.getElementById('mc');if(el)el.innerHTML=rView();bindAll();}
 
-async function goD(){await navDash();}
+async function navDash(){
+  closeSb();
+  try{
+    await loadPacs();
+    await loadAgenda();
+  }catch(e){ console.error('navDash load erro',e); }
+  nav('dashboard');
+}
+async function goD(){ await navDash(); }
 async function openPac(id){await loadPac(id);S.tab='timeline';S.editAnam=false;nav('paciente');}
 
 
