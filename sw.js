@@ -1,12 +1,12 @@
-// Fisiovida — Service Worker de auto-remoção
-// Este SW limpa todos os caches e se desregistra para liberar clientes presos em cache antigo.
-self.addEventListener('install', () => self.skipWaiting());
-self.addEventListener('activate', (e) => {
-  e.waitUntil((async () => {
-    const keys = await caches.keys();
-    await Promise.all(keys.map(k => caches.delete(k)));
-    await self.registration.unregister();
-    const clients = await self.clients.matchAll();
-    clients.forEach(c => c.navigate(c.url));
+// Fisiovida — SW de auto-remocao (sem reload para evitar loops)
+self.addEventListener('install', function(){ self.skipWaiting(); });
+self.addEventListener('activate', function(e){
+  e.waitUntil((async function(){
+    try{
+      var keys = await caches.keys();
+      await Promise.all(keys.map(function(k){ return caches.delete(k); }));
+      await self.registration.unregister();
+    }catch(err){}
   })());
 });
+// Nao intercepta fetch — navegador busca tudo da rede
