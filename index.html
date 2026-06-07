@@ -971,6 +971,8 @@ function bindSlider(){
 // ── RELATÓRIO DE ALTA ──
 async function gerarRelatorioAlta(){
   const p=S.pac;if(!p){toast('Nenhum paciente','err');return;}
+  toast('Preparando PDF...');
+  await loadPDFMake();
   const a=p.anamnese?.[0]||{};
   const pk=p.pacotes?.find(pk=>pk.status==='ativo')||p.pacotes?.[p.pacotes.length-1];
   const sessoes=(pk?.sessoes||[]).sort((x,y)=>new Date(x.data_sessao)-new Date(y.data_sessao));
