@@ -1159,6 +1159,7 @@ async function saveCfg(dados){
 // ── PACIENTES ──
 async function loadPacs(){
   S.pacientes=await q(()=>sb.from('pacientes').select('id,nome,telefone,foto_url,created_at,anamnese(tipo_cirurgia,data_cirurgia),pacotes(id,status,total_sessoes,sessoes(count))').eq('user_id',S.user.id).order('created_at',{ascending:false}))||[];
+  await assinarAvatares(S.pacientes);
 }
 
 // ── URLs ASSINADAS (bucket privado) ──
@@ -1171,6 +1172,30 @@ function storagePathFromUrl(u){
   return m?m[1]:null;
 }
 
+async function assinarAvatar(pac){
+  if(!pac||!pac.foto_url) return;
+  var path=storagePathFromUrl(pac.foto_url);
+  if(!path||path.indexOf('http')===0||path.indexOf('data:')===0) return;
+  try{
+    var r=await sb.storage.from('fisiovida').createSignedUrl(path,3600);
+    if(r&&r.data&&r.data.signedUrl) pac.foto_url=r.data.signedUrl;
+  }catch(e){}
+}
+async function assinarAvatares(pacs){
+  if(!pacs||!pacs.length) return;
+  var paths=[],mapPac={};
+  pacs.forEach(function(p){
+    if(p.foto_url){
+      var path=storagePathFromUrl(p.foto_url);
+      if(path&&path.indexOf('http')!==0&&path.indexOf('data:')!==0){ paths.push(path); mapPac[path]=p; }
+    }
+  });
+  if(!paths.length) return;
+  try{
+    var res=await sb.storage.from('fisiovida').createSignedUrls(paths,3600);
+    if(res&&res.data) res.data.forEach(function(it){ if(it.path&&it.signedUrl&&mapPac[it.path]) mapPac[it.path].foto_url=it.signedUrl; });
+  }catch(e){}
+}
 async function assinarFotosPac(pac){
   if(!pac||!pac.pacotes) return;
   // Coletar todos os paths
@@ -1201,6 +1226,7 @@ async function loadPac(id){
   S.pac=rows?.[0]||null;
   if(S.pac){
     await assinarFotosPac(S.pac);
+    await assinarAvatar(S.pac);
     await loadEvolucao(id);
   }
 }
@@ -1222,6 +1248,40 @@ async function saveAnam(dados){
 async function savePacote(dados){
   await q(()=>sb.from('pacotes').insert({...dados,paciente_id:S.pac.id}));
   toast('Pacote criado','ok');await loadPac(S.pac.id);
+}
+
+function modalEditarPk(id){
+  var pk=(S.pac&&S.pac.pacotes||[]).find(function(x){return x.id===id;});
+  if(!pk)return;
+  modal('<div class="mo-box"><div class="mo-hd"><div class="mo-t">Editar Pacote</div><button class="mo-cls" onclick="closeMo()">\u2715</button></div>'
+    +'<div class="fg"><label class="fl">Descrição</label><input class="fi" id="epd" value="'+escH(pk.descricao||'')+'"></div>'
+    +'<div class="fg2"><div class="fg"><label class="fl">Total de Sessões</label><input class="fi" type="number" min="1" id="ept" value="'+(pk.total_sessoes||0)+'"></div>'
+    +'<div class="fg"><label class="fl">Data de Início</label><input class="fi" type="date" id="epi" value="'+(pk.data_inicio||'')+'"></div></div>'
+    +'<div class="fg"><label class="fl">Status</label><select class="fsel" id="eps"><option value="ativo" '+(pk.status==='ativo'?'selected':'')+'>Ativo</option><option value="concluido" '+(pk.status!=='ativo'?'selected':'')+'>Concluído</option></select></div>'
+    +'<div class="flex gap8 mt8"><button class="btn btn-p" id="epsave" style="flex:1;justify-content:center">Salvar</button><button class="btn btn-s" onclick="closeMo()">Cancelar</button></div></div>');
+  document.getElementById('epsave').addEventListener('click',async function(){
+    var dados={descricao:document.getElementById('epd').value.trim()||'Pacote de Sessões',
+      total_sessoes:parseInt(document.getElementById('ept').value)||1,
+      data_inicio:document.getElementById('epi').value||null,
+      status:document.getElementById('eps').value};
+    try{
+      await q(function(){return sb.from('pacotes').update(dados).eq('id',id);});
+      toast('Pacote atualizado','ok');closeMo();await loadPac(S.pac.id);setTab('pacote');
+    }catch(e){toast('Erro: '+e.message,'err');}
+  });
+}
+
+function excluirPacote(id){
+  var pk=(S.pac&&S.pac.pacotes||[]).find(function(x){return x.id===id;});
+  var nSess=pk&&pk.sessoes?(Array.isArray(pk.sessoes)?pk.sessoes.length:0):0;
+  var aviso='Excluir este pacote?';
+  if(nSess>0) aviso='Excluir este pacote vai apagar TAMBÉM as '+nSess+' sessão(ões) e as fotos vinculadas. Esta ação não pode ser desfeita.';
+  confirmar(aviso,async function(){
+    try{
+      await q(function(){return sb.from('pacotes').delete().eq('id',id);});
+      toast('Pacote excluído','ok');await loadPac(S.pac.id);setTab('pacote');
+    }catch(e){toast('Erro: '+e.message,'err');}
+  });
 }
 async function saveSessao(dados){
   const pk=S.pac?.pacotes?.find(p=>p.status==='ativo');
@@ -2618,7 +2678,7 @@ function rAnam(){
 }
 function rPkTab(){
   const pks=S.pac?.pacotes||[];
-  return`<div style="display:flex;flex-direction:column;gap:16px"><div class="flex ai-c jb"><div class="sec-t">Pacotes</div><button class="btn btn-p btn-sm" id="bnpk">+ Novo Pacote</button></div>${!pks.length?`<div class="tl-empty"><div style="font-size:40px;margin-bottom:12px">📦</div><div style="font-size:15px;font-weight:600;color:var(--txt2)">Nenhum pacote cadastrado</div></div>`:pks.map(pk=>{const n=pk.sessoes?.length||0,t=pk.total_sessoes||0,p2=t>0?Math.round((n/t)*100):0;return`<div class="card"><div class="flex ai-c jb" style="margin-bottom:12px"><div><div style="font-size:15px;font-weight:700">${pk.descricao||'Pacote de Sessões'}</div><div style="font-size:12px;color:var(--txt3)">Início: ${fmtD(pk.data_inicio)}</div></div><span class="badge ${pk.status==='ativo'?'b-acc':'b-n'}">${pk.status==='ativo'?'Ativo':'Concluído'}</span></div><div class="flex ai-c gap12"><div style="flex:1"><div class="prog-bar" style="height:8px;width:100%"><div class="prog-fill" style="width:${p2}%"></div></div></div><div style="font-size:13px;font-weight:600;color:var(--txt2)">${n}/${t}</div></div></div>`;}).join('')}</div>`;
+  return`<div style="display:flex;flex-direction:column;gap:16px"><div class="flex ai-c jb"><div class="sec-t">Pacotes</div><button class="btn btn-p btn-sm" id="bnpk">+ Novo Pacote</button></div>${!pks.length?`<div class="tl-empty"><div style="font-size:40px;margin-bottom:12px">📦</div><div style="font-size:15px;font-weight:600;color:var(--txt2)">Nenhum pacote cadastrado</div></div>`:pks.map(pk=>{const n=pk.sessoes?.length||0,t=pk.total_sessoes||0,p2=t>0?Math.round((n/t)*100):0;return`<div class="card"><div class="flex ai-c jb" style="margin-bottom:12px"><div><div style="font-size:15px;font-weight:700">${pk.descricao||'Pacote de Sessões'}</div><div style="font-size:12px;color:var(--txt3)">Início: ${fmtD(pk.data_inicio)}</div></div><div class="flex ai-c gap8"><span class="badge ${pk.status==='ativo'?'b-acc':'b-n'}">${pk.status==='ativo'?'Ativo':'Concluído'}</span><button class="btn btn-g btn-sm" onclick="event.stopPropagation();modalEditarPk('${pk.id}')" title="Editar pacote">✏</button><button class="btn btn-g btn-sm" style="color:#DC2626" onclick="event.stopPropagation();excluirPacote('${pk.id}')" title="Excluir pacote">🗑</button></div></div><div class="flex ai-c gap12"><div style="flex:1"><div class="prog-bar" style="height:8px;width:100%"><div class="prog-fill" style="width:${p2}%"></div></div></div><div style="font-size:13px;font-weight:600;color:var(--txt2)">${n}/${t}</div></div></div>`;}).join('')}</div>`;
 }
 
 // ── SESSÃO FORM ──
@@ -2783,11 +2843,51 @@ function modalNovoPac(){
 function modalEditPac(){
   const p=S.pac;
   modal(`<div class="mo-box"><div class="mo-hd"><div class="mo-t">Editar Paciente</div><button class="mo-cls" onclick="closeMo()">✕</button></div>
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:16px">
+      <div class="pac-av" id="ed-avatar" style="width:64px;height:64px;font-size:22px;flex-shrink:0">${p.foto_url?`<img src="${p.foto_url}" style="width:100%;height:100%;object-fit:cover">`:ini(p.nome)}</div>
+      <div style="flex:1">
+        <label class="btn btn-s btn-sm" style="cursor:pointer">📷 Escolher foto<input type="file" id="ed-foto" accept="image/*" style="display:none"></label>
+        ${p.foto_url?`<button class="btn btn-g btn-sm" style="color:#DC2626;margin-left:6px" onclick="removerFotoPac()">Remover</button>`:''}
+        <div style="font-size:11px;color:var(--txt3);margin-top:6px">JPG ou PNG. A foto é privada e só você vê.</div>
+      </div>
+    </div>
     <div class="fg2"><div class="fg" style="grid-column:1/-1"><label class="fl">Nome Completo</label><input class="fi" id="mn" value="${p.nome}"></div><div class="fg"><label class="fl">Data de Nascimento</label><input class="fi" type="date" id="mdn" value="${p.data_nascimento||''}"></div><div class="fg"><label class="fl">Telefone</label><input class="fi" id="mt" value="${p.telefone||''}"></div><div class="fg" style="grid-column:1/-1"><label class="fl">E-mail</label><input class="fi" type="email" id="me" value="${p.email||''}"></div></div>
     <div class="flex gap8 mt8"><button class="btn btn-p" id="mcp" style="flex:1;justify-content:center">Salvar</button><button class="btn btn-s" onclick="closeMo()">Cancelar</button></div></div>`);
-  document.getElementById('mcp').addEventListener('click',async()=>{
-    try{await savePac({id:p.id,nome:document.getElementById('mn').value.trim(),data_nascimento:document.getElementById('mdn').value||null,telefone:document.getElementById('mt').value.trim()||null,email:document.getElementById('me').value.trim()||null});closeMo();await loadPac(p.id);setTab('dados');}catch(e){toast('Erro: '+e.message,'err');}
+  // preview imediato ao escolher foto
+  var inp=document.getElementById('ed-foto');
+  if(inp) inp.addEventListener('change',function(){
+    var f=this.files&&this.files[0]; if(!f)return;
+    var av=document.getElementById('ed-avatar');
+    if(av){var u=URL.createObjectURL(f);av.innerHTML='<img src="'+u+'" style="width:100%;height:100%;object-fit:cover">';}
   });
+  document.getElementById('mcp').addEventListener('click',async()=>{
+    try{
+      var dados={id:p.id,nome:document.getElementById('mn').value.trim(),data_nascimento:document.getElementById('mdn').value||null,telefone:document.getElementById('mt').value.trim()||null,email:document.getElementById('me').value.trim()||null};
+      // Upload de foto, se escolhida
+      var fInput=document.getElementById('ed-foto');
+      var file=fInput&&fInput.files&&fInput.files[0];
+      if(file){
+        toast('Enviando foto...');
+        var blob=await compImg(file,400,0.8);
+        var path='avatars/'+p.id+'_'+Date.now()+'.jpg';
+        var up=await sb.storage.from('fisiovida').upload(path,blob,{contentType:'image/jpeg',upsert:true});
+        if(!up.error) dados.foto_url=path;
+        else { toast('Erro ao enviar foto','err'); }
+      } else if(p._removerFoto){
+        dados.foto_url=null;
+      }
+      await savePac(dados);
+      delete p._removerFoto;
+      closeMo();await loadPac(p.id);setTab('dados');
+    }catch(e){toast('Erro: '+e.message,'err');}
+  });
+}
+
+function removerFotoPac(){
+  if(S.pac) S.pac._removerFoto=true;
+  var av=document.getElementById('ed-avatar');
+  if(av&&S.pac) av.innerHTML=ini(S.pac.nome);
+  toast('Foto será removida ao salvar');
 }
 function modalNovoPk(){
   modal(`<div class="mo-box"><div class="mo-hd"><div class="mo-t">Novo Pacote</div><button class="mo-cls" onclick="closeMo()">✕</button></div>
