@@ -13,6 +13,9 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&display=swap" rel="stylesheet">
+  <link rel="preconnect" href="https://tvheuwykjdohdqrtwmne.supabase.co" crossorigin>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="dns-prefetch" href="https://tvheuwykjdohdqrtwmne.supabase.co">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -545,10 +548,12 @@ const sb=window.supabase.createClient(SUPA_URL,SUPA_KEY);
 async function q(fn){
   for(let i=0;i<3;i++){
     try{
-      const{data:{session}}=await sb.auth.getSession();
-      if(!session&&i>0)await sb.auth.refreshSession();
+      if(i>0){ // só verifica/renova sessão em nova tentativa após falha
+        const{data:{session}}=await sb.auth.getSession();
+        if(!session)await sb.auth.refreshSession();
+      }
       const r=await fn();if(r.error)throw r.error;return r.data;
-    }catch(e){if(i===2)throw e;await new Promise(r=>setTimeout(r,1000*(i+1)));}
+    }catch(e){if(i===2)throw e;await new Promise(r=>setTimeout(r,600*(i+1)));}
   }
 }
 
@@ -1103,10 +1108,7 @@ async function boot(){
     const{data:{session}}=await sb.auth.getSession();
     if(session){
       S.user=session.user;
-      await loadCfg();
-      await loadPacs();
-      await loadAgenda();
-      await loadProfissionais();
+      await Promise.all([loadCfg(),loadPacs(),loadAgenda(),loadProfissionais()]);
       try{const p=sessionStorage.getItem('profAtual');if(p)S.profAtual=JSON.parse(p);}catch(e){}
       if(S.profissionais.length>0&&!S.profAtual){
         const app=document.getElementById('app');
@@ -1156,7 +1158,7 @@ async function saveCfg(dados){
 
 // ── PACIENTES ──
 async function loadPacs(){
-  S.pacientes=await q(()=>sb.from('pacientes').select('*,anamnese(*),pacotes(*,sessoes(count))').eq('user_id',S.user.id).order('created_at',{ascending:false}))||[];
+  S.pacientes=await q(()=>sb.from('pacientes').select('id,nome,telefone,foto_url,created_at,anamnese(tipo_cirurgia,data_cirurgia),pacotes(id,status,total_sessoes,sessoes(count))').eq('user_id',S.user.id).order('created_at',{ascending:false}))||[];
 }
 
 // ── URLs ASSINADAS (bucket privado) ──
