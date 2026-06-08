@@ -456,6 +456,10 @@
     .mod-chips{display:flex;flex-wrap:wrap;gap:6px;}
     .mod-chip{font-size:12px;padding:5px 11px;border-radius:16px;border:1.5px solid var(--border);background:var(--surface);color:var(--txt2);cursor:pointer;transition:background-color .15s,border-color .15s,color .15s;}
     .mod-chip:hover{background:var(--primary-lt);border-color:var(--primary);color:var(--primary-dk);}
+    .sb-foot .u-card{flex:1;}
+    .trocar-perfil-btn{background:var(--surface);border:1.5px solid var(--border);border-radius:10px;width:38px;height:38px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--txt2);flex-shrink:0;transition:background-color .15s,border-color .15s,color .15s;}
+    .trocar-perfil-btn:hover{background:var(--primary-lt);border-color:var(--primary);color:var(--primary-dk);}
+    .trocar-perfil-btn svg{width:18px;height:18px;}
     @keyframes spin{to{transform:rotate(360deg);}}
     @keyframes fi{to{opacity:1;}}
     @keyframes su{from{transform:translateY(16px);opacity:0;}to{transform:translateY(0);opacity:1;}}
@@ -669,16 +673,22 @@ function nivelRestrito(){
 }
 
 // ── TELA SELEÇÃO PROFISSIONAL ──
+function ownerProf(){
+  return {id:'__owner__',nome:S.config.nome_profissional||(S.user&&S.user.email)||'Administrador',crefito:S.config.crefito||'',nivel:'admin',pin_hash:null,acesso_sensivel:true};
+}
+function mostrarSeletorPerfil(){
+  var app=document.getElementById('app');
+  if(app){app.dataset.booted='1';app.innerHTML=rSelecionarProfissional();}
+  bindProfSelect();
+}
+function trocarPerfil(){
+  S.profAtual=null;
+  try{sessionStorage.removeItem('profAtual');}catch(e){}
+  if(typeof closeSb==='function')closeSb();
+  mostrarSeletorPerfil();
+}
 function rSelecionarProfissional(){
-  // Dono da conta (baseado nas configs — sempre aparece como primeiro card)
-  const dono={
-    id:'__owner__',
-    nome:S.config.nome_profissional||S.user?.email||'Administrador',
-    crefito:S.config.crefito||'',
-    nivel:'admin',
-    pin_hash:null,
-    acesso_sensivel:true
-  };
+  const dono=ownerProf();
   const todos=[dono,...S.profissionais];
   return`<div class="prof-sel">
     <div style="width:100%;max-width:520px">
@@ -709,15 +719,17 @@ function rSelecionarProfissional(){
 function nivelLabel(n){return{admin:'Administrador',profissional:'Fisioterapeuta',auxiliar:'Auxiliar'}[n]||n;}
 
 async function selecionarProf(id){
-  const prof=S.profissionais.find(p=>p.id===id);if(!prof)return;
+  const prof = id==='__owner__' ? ownerProf() : S.profissionais.find(p=>p.id===id);
+  if(!prof)return;
   if(prof.pin_hash){
     modalPIN(prof,()=>{
-      sessionStorage.setItem('profAtual',JSON.stringify(S.profAtual));
+      S.profAtual=prof;
+      try{sessionStorage.setItem('profAtual',JSON.stringify(prof));}catch(e){}
       restoreView();
     });
   } else {
     S.profAtual=prof;
-    sessionStorage.setItem('profAtual',JSON.stringify(prof));
+    try{sessionStorage.setItem('profAtual',JSON.stringify(prof));}catch(e){}
     restoreView();
   }
 }
@@ -1111,11 +1123,10 @@ async function boot(){
       await Promise.all([loadCfg(),loadPacs(),loadAgenda(),loadProfissionais()]);
       try{const p=sessionStorage.getItem('profAtual');if(p)S.profAtual=JSON.parse(p);}catch(e){}
       if(S.profissionais.length>0&&!S.profAtual){
-        const app=document.getElementById('app');
-        if(app){app.dataset.booted='1';app.innerHTML=rSelecionarProfissional();}
-        bindProfSelect();
+        mostrarSeletorPerfil();
         return;
       }
+      if(!S.profAtual) S.profAtual=ownerProf();
       restoreView();
     } else nav('login');
     const app2=document.getElementById('app');if(app2)app2.dataset.booted='1';
@@ -1143,7 +1154,12 @@ function mostrarErroBoot(err){
 }
 async function login(email,pw){
   const{data,error}=await sb.auth.signInWithPassword({email,password:pw});
-  if(error)throw error;S.user=data.user;await loadCfg();await loadPacs();await loadAgenda();nav('dashboard');
+  if(error)throw error;
+  S.user=data.user;
+  S.profAtual=null; try{sessionStorage.removeItem('profAtual');}catch(e){} // novo login sempre pede perfil
+  await Promise.all([loadCfg(),loadPacs(),loadAgenda(),loadProfissionais()]);
+  if(S.profissionais.length>0){ mostrarSeletorPerfil(); }       // tem equipe: escolher quem está atendendo
+  else { S.profAtual=ownerProf(); nav('dashboard'); }            // conta individual: entra direto
 }
 async function sair(){await sb.auth.signOut();S.user=null;nav('login');}
 
@@ -1962,7 +1978,8 @@ function icon(nome){
     users:'<circle cx="9" cy="8" r="3.2"/><path d="M3 19c0-3 2.7-5 6-5s6 2 6 5"/><path d="M16 6.2A3 3 0 0 1 16 12"/><path d="M18 14c2 .6 3.5 2.2 3.5 4.5"/>',
     calendar:'<rect x="3.5" y="4.5" width="17" height="16" rx="2"/><path d="M3.5 9h17"/><path d="M8 2.5v4M16 2.5v4"/>',
     gear:'<circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5 5l2.1 2.1M16.9 16.9 19 19M19 5l-2.1 2.1M7.1 16.9 5 19"/>',
-    exit:'<path d="M9 4.5H5.5A1.5 1.5 0 0 0 4 6v12a1.5 1.5 0 0 0 1.5 1.5H9"/><path d="M15 8l4 4-4 4"/><path d="M19 12H9"/>'
+    exit:'<path d="M9 4.5H5.5A1.5 1.5 0 0 0 4 6v12a1.5 1.5 0 0 0 1.5 1.5H9"/><path d="M15 8l4 4-4 4"/><path d="M19 12H9"/>',
+    swap:'<path d="M7 4 3 8l4 4"/><path d="M3 8h13a4 4 0 0 1 4 4"/><path d="M17 20l4-4-4-4"/><path d="M21 16H8a4 4 0 0 1-4-4"/>'
   };
   return '<svg class="nav-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">'+(p[nome]||'')+'</svg>';
 }
@@ -1993,6 +2010,7 @@ function rSidebar(){
         <div class="u-role">${S.profAtual?(S.profAtual.crefito||nivelLabel(S.profAtual.nivel)):(S.config.crefito||'Fisioterapeuta')}</div>
         ${nivelRestrito()&&!temAcessoSensivel()?'<div style="font-size:9px;color:#f59e0b;margin-top:1px">🔒 Modo restrito</div>':''}
       </div>
+      ${S.profissionais.length>0?`<button class="trocar-perfil-btn" onclick="trocarPerfil()" title="Trocar perfil">${icon('swap')}</button>`:''}
       </div>
       <button class="nav-btn-cfg ${cfgAtivo?'cfg-active':''}" onclick="nav('configuracoes')">${icon('gear')} Configurações</button>
       <button class="btn-sair" onclick="sair()">${icon('exit')} Sair</button>
@@ -3354,6 +3372,7 @@ function modalEditProf(id){
       toast(prof?'Profissional atualizado':'Profissional adicionado','ok');
       closeMo();
       await loadProfissionais();
+      if(!S.profAtual) S.profAtual=ownerProf();
       render();
     }catch(e){toast('Erro ao salvar: '+e.message,'err');}
   });
